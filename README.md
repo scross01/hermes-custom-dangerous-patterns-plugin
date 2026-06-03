@@ -1,5 +1,14 @@
 # hermes-custom-dangerous-patterns
 
+> **⚠️ EXPERIMENTAL — USE AT YOUR OWN RISK**
+>
+> This plugin is in **early development** and has not been rigorously tested
+> across all Hermes environments, versions, or edge cases. There is **no
+> guarantee** that all destructive commands will be caught or blocked. Pattern
+> matching is best-effort — creative command obfuscation, shell expansions,
+> piped commands, or edge cases in the approval flow may bypass detection.
+> **Do not rely on this plugin as your sole safety net for critical operations.**
+
 A [Hermes Agent](https://github.com/NousResearch/hermes-agent) plugin that adds custom dangerous command patterns to Hermes's built-in approval system.
 
 ## What It Does
