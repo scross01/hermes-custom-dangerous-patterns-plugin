@@ -27,6 +27,7 @@ SAMPLE_CONFIG = {
             "description": "Read-only Vultr account info",
         },
     ],
+    "deny_patterns": [],
 }
 
 SAMPLE_YAML = """
@@ -42,6 +43,8 @@ patterns:
 allow_patterns:
   - pattern: '\\bvultr\\s+account\\s+info\\b'
     description: 'Read-only Vultr account info'
+
+deny_patterns: []
 """
 
 
@@ -81,6 +84,7 @@ def reset_patterns_globals(monkeypatch):
 
     monkeypatch.setattr(patterns_module, "_block_compiled", [])
     monkeypatch.setattr(patterns_module, "_allow_compiled", [])
+    monkeypatch.setattr(patterns_module, "_deny_compiled", [])
 
 
 @pytest.fixture

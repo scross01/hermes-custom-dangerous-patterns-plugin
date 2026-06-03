@@ -78,6 +78,100 @@ def test_compile_allow_patterns_skips_disabled():
 
 
 # ---------------------------------------------------------------------------
+# compile_deny_patterns
+# ---------------------------------------------------------------------------
+
+
+def test_compile_deny_patterns_valid():
+    """Valid deny patterns compile correctly."""
+    from patterns import compile_deny_patterns
+
+    raw = [{"pattern": r"\bruby\s+-e\s+.*system\b", "description": "Ruby exec"}]
+    compiled = compile_deny_patterns(raw)
+    assert len(compiled) == 1
+    assert isinstance(compiled[0][0], re.Pattern)
+    assert compiled[0][1] == "Ruby exec"
+
+
+def test_compile_deny_patterns_skips_disabled():
+    """Deny patterns with enabled: false are skipped."""
+    from patterns import compile_deny_patterns
+
+    raw = [
+        {"pattern": r"\bdanger\b", "description": "Danger", "enabled": False},
+        {"pattern": r"\bsafe\b", "description": "Safe"},
+    ]
+    compiled = compile_deny_patterns(raw)
+    assert len(compiled) == 1
+    assert compiled[0][1] == "Safe"
+
+
+def test_compile_deny_patterns_skips_invalid():
+    """Invalid deny regex is skipped."""
+    from patterns import compile_deny_patterns
+
+    raw = [
+        {"pattern": "(unclosed", "description": "Bad"},
+        {"pattern": r"\bsafe\b", "description": "Good"},
+    ]
+    compiled = compile_deny_patterns(raw)
+    assert len(compiled) == 1
+
+
+# ---------------------------------------------------------------------------
+# is_deny_pattern
+# ---------------------------------------------------------------------------
+
+
+def test_is_deny_pattern_matches(reset_patterns_globals):
+    """Matching command returns the deny pattern description."""
+    from patterns import compile_all, is_deny_pattern
+
+    config = {
+        "deny_patterns": [
+            {"pattern": r"\bruby\s+-e\s+.*system\b", "description": "Ruby system exec"}
+        ]
+    }
+    compile_all(config)
+    result = is_deny_pattern("ruby -e 'system(\"rm -rf /\")'")
+    assert result == "Ruby system exec"
+
+
+def test_is_deny_pattern_no_match(reset_patterns_globals):
+    """Non-matching command returns None."""
+    from patterns import compile_all, is_deny_pattern
+
+    config = {
+        "deny_patterns": [
+            {"pattern": r"\bruby\s+-e\s+.*system\b", "description": "Ruby system exec"}
+        ]
+    }
+    compile_all(config)
+    result = is_deny_pattern("ruby -e 'puts \"hello\"'")
+    assert result is None
+
+
+def test_is_deny_pattern_no_patterns(reset_patterns_globals):
+    """No deny patterns returns None."""
+    from patterns import compile_all, is_deny_pattern
+
+    compile_all({})
+    assert is_deny_pattern("anything") is None
+
+
+def test_get_deny_patterns_returns_copy(reset_patterns_globals):
+    """get_deny_patterns returns a copy, not the internal list."""
+    from patterns import compile_all, get_deny_patterns
+
+    compile_all({
+        "deny_patterns": [{"pattern": r"\bdanger\b", "description": "Danger"}]
+    })
+    patterns = get_deny_patterns()
+    patterns.clear()
+    assert len(get_deny_patterns()) == 1
+
+
+# ---------------------------------------------------------------------------
 # compile_allow_patterns
 # ---------------------------------------------------------------------------
 

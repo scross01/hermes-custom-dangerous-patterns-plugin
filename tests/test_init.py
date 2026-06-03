@@ -25,6 +25,7 @@ SAMPLE_PATTERN_CONFIG = {
         {"pattern": r"\bvultr\b", "description": "Vultr CLI"},
     ],
     "allow_patterns": [],
+    "deny_patterns": [],
 }
 
 SAMPLE_ALLOW_CONFIG = {
@@ -33,6 +34,17 @@ SAMPLE_ALLOW_CONFIG = {
     ],
     "allow_patterns": [
         {"pattern": r"\bvultr\s+account\s+info\b", "description": "Read-only"},
+    ],
+    "deny_patterns": [],
+}
+
+SAMPLE_DENY_CONFIG = {
+    "patterns": [
+        {"pattern": r"\bvultr\b", "description": "Vultr CLI"},
+    ],
+    "allow_patterns": [],
+    "deny_patterns": [
+        {"pattern": r"\bruby\s+-e\s+.*system\b", "description": "Ruby system exec"},
     ],
 }
 
@@ -65,7 +77,7 @@ def test_register_no_patterns(
     ctx = MagicMock()
     init_register.register(ctx)
 
-    assert any("no patterns configured" in m for m in messages)
+    assert any("no active patterns" in m for m in messages)
 
 
 def test_register_injects_block_patterns(
@@ -175,3 +187,118 @@ def test_patched_preserves_function_metadata(monkeypatch):
     _patch_detect_function(allow_checker)
     assert approval.detect_dangerous_command.__name__ == "detect_dangerous_command"
     assert approval.detect_dangerous_command.__qualname__ == "detect_dangerous_command"
+
+
+# ---------------------------------------------------------------------------
+# _patch_deny_handler
+# ---------------------------------------------------------------------------
+
+
+def test_deny_handler_blocks_matching_command(monkeypatch):
+    """When deny pattern matches, returns blocked result without calling original."""
+    approval = _install_tools_approval(monkeypatch)
+    mock_original = MagicMock()
+    approval.check_all_command_guards = mock_original
+
+    from __init__ import _patch_deny_handler
+
+    def deny_checker(cmd):
+        return "Ruby system exec" if "ruby" in cmd else None
+
+    _patch_deny_handler(deny_checker)
+    result = approval.check_all_command_guards("ruby -e 'system(\"rm\")'")
+    assert result["approved"] is False
+    assert "Ruby system exec" in result["message"]
+    assert "deny" in result["message"].lower()
+    mock_original.assert_not_called()
+
+
+def test_deny_handler_no_match_falls_through(monkeypatch):
+    """When no deny pattern matches, original guard function is called."""
+    approval = _install_tools_approval(monkeypatch)
+    mock_original = MagicMock(return_value={"approved": True, "message": "ok"})
+    approval.check_all_command_guards = mock_original
+
+    from __init__ import _patch_deny_handler
+
+    def deny_checker(cmd):
+        return None
+
+    _patch_deny_handler(deny_checker)
+    result = approval.check_all_command_guards("echo hello")
+    assert result["approved"] is True
+    mock_original.assert_called_once()
+
+
+def test_deny_handler_fallback_when_guards_missing(monkeypatch):
+    """When check_all_command_guards is missing, falls back to detect patch."""
+    approval = _install_tools_approval(monkeypatch)
+    # check_all_command_guards was never set on this mock - the fallback
+    # path in _patch_deny_handler tests getattr returning None
+
+    mock_original = MagicMock(return_value=(False, None, None))
+    approval.detect_dangerous_command = mock_original
+
+    from __init__ import _patch_deny_handler
+
+    def deny_checker(cmd):
+        return "Blocked" if "danger" in cmd else None
+
+    _patch_deny_handler(deny_checker)
+    result = approval.detect_dangerous_command("danger command")
+    assert result[0] is True
+    assert "DENY" in result[1]
+    mock_original.assert_not_called()
+
+
+def test_deny_handler_fallback_composes_with_allow(monkeypatch):
+    """Fallback path preserves allow-before-deny when allow already patched."""
+    approval = _install_tools_approval(monkeypatch)
+
+    # Phase 1: patch allow patterns (simulating register step 3)
+    from __init__ import _patch_detect_function, _patch_deny_handler
+
+    def allow_checker(cmd):
+        return "Allowed" if "safe" in cmd else None
+
+    _patch_detect_function(allow_checker)
+
+    # Phase 2: patch deny patterns via fallback (simulating register step 4)
+    # Pass allow_checker so the fallback wrapper checks allow before deny
+    def deny_checker(cmd):
+        return "Blocked" if "danger" in cmd else None
+
+    _patch_deny_handler(deny_checker, allow_checker)
+
+    # Allow wins: command matches both allow and deny, allow checked first
+    result = approval.detect_dangerous_command("safe danger command")
+    assert result == (False, None, None)  # allow exempts
+
+    # Deny-only: command matches only deny, should be blocked
+    result = approval.detect_dangerous_command("danger command")
+    assert result[0] is True
+    assert "DENY" in result[1]
+
+    # No match: falls through to original
+    result = approval.detect_dangerous_command("ordinary command")
+    assert result == (False, None, None)
+
+
+def test_register_with_deny_patterns(
+    monkeypatch, tmp_path, init_register
+):
+    """register() with deny patterns patches check_all_command_guards."""
+    monkeypatch.setattr(
+        init_register.config, "load_config",
+        lambda: dict(SAMPLE_DENY_CONFIG),
+    )
+
+    approval = _install_tools_approval(monkeypatch)
+    approval.check_all_command_guards = MagicMock()
+
+    ctx = MagicMock()
+    init_register.register(ctx)
+
+    # Verify check_all_command_guards was patched (deny handler installed)
+    assert approval.check_all_command_guards.__name__ == "check_all_command_guards"
+    assert approval.check_all_command_guards.__qualname__ == "check_all_command_guards"

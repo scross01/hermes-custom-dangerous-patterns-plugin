@@ -17,6 +17,7 @@ _RE_FLAGS = re.IGNORECASE | re.DOTALL
 # Module-level compiled patterns, set once by compile_all().
 _block_compiled: list[tuple[re.Pattern, str]] = []
 _allow_compiled: list[tuple[re.Pattern, str]] = []
+_deny_compiled: list[tuple[re.Pattern, str]] = []
 
 
 def compile_block_patterns(raw_patterns: list[dict[str, str]]) -> list[tuple[re.Pattern, str]]:
@@ -67,14 +68,39 @@ def compile_allow_patterns(raw_patterns: list[dict[str, str]]) -> list[tuple[re.
     return compiled
 
 
+def compile_deny_patterns(raw_patterns: list[dict[str, str]]) -> list[tuple[re.Pattern, str]]:
+    """Compile deny patterns from config into (compiled_regex, description).
+
+    Deny patterns block commands immediately without an approval prompt.
+    They are checked AFTER allow patterns but BEFORE block patterns.
+    Disabled patterns (enabled: false) are skipped.
+    """
+    compiled = []
+    for entry in raw_patterns:
+        if not entry.get("enabled", True):
+            continue
+        pattern_str = entry["pattern"]
+        description = entry.get("description", pattern_str)
+        try:
+            compiled.append((re.compile(pattern_str, _RE_FLAGS), description))
+        except re.error as exc:
+            logger.warning(
+                "custom-dangerous-patterns: skipping invalid deny regex %r: %s",
+                pattern_str,
+                exc,
+            )
+    return compiled
+
+
 def compile_all(config: dict[str, Any]) -> None:
     """Compile all patterns from config and store in module globals.
 
     Call once during plugin registration.
     """
-    global _block_compiled, _allow_compiled
+    global _block_compiled, _allow_compiled, _deny_compiled
     _block_compiled = compile_block_patterns(config.get("patterns", []))
     _allow_compiled = compile_allow_patterns(config.get("allow_patterns", []))
+    _deny_compiled = compile_deny_patterns(config.get("deny_patterns", []))
 
 
 def is_allow_pattern(command: str) -> str | None:
@@ -101,6 +127,30 @@ def is_allow_pattern(command: str) -> str | None:
 def get_block_patterns() -> list[tuple[re.Pattern, str]]:
     """Return the compiled block patterns (for injection into DANGEROUS_PATTERNS)."""
     return list(_block_compiled)
+
+
+def get_deny_patterns() -> list[tuple[re.Pattern, str]]:
+    """Return the compiled deny patterns."""
+    return list(_deny_compiled)
+
+
+def is_deny_pattern(command: str) -> str | None:
+    """Check if a command matches any deny pattern.
+
+    Called BEFORE the approval prompt. Returns the matching deny pattern's
+    description if matched, or None. Unlike block patterns, deny matches
+    result in immediate blocking without a prompt.
+    """
+    if not _deny_compiled:
+        return None
+
+    cmd_normalized = _normalize(command)
+
+    for deny_re, desc in _deny_compiled:
+        if deny_re.search(cmd_normalized):
+            return desc
+
+    return None
 
 
 def _normalize(command: str) -> str:

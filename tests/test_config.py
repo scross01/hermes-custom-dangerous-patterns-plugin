@@ -186,12 +186,35 @@ def test_validate_pattern_invalid_regex():
 
 
 def test_validate_config_full(sample_config):
-    """Full valid config returns both pattern lists."""
+    """Full valid config returns all three pattern lists."""
     from config import _validate_config
 
     result = _validate_config(sample_config)
     assert len(result["patterns"]) == 2
     assert len(result["allow_patterns"]) == 1
+    assert len(result["deny_patterns"]) == 0
+
+
+def test_validate_config_with_deny_patterns():
+    """Config with deny_patterns validates correctly."""
+    from config import _validate_config
+
+    raw = {
+        "deny_patterns": [
+            {"pattern": r"\bruby\s+-e\s+.*system\b", "description": "Ruby system exec"},
+        ],
+    }
+    result = _validate_config(raw)
+    assert len(result["deny_patterns"]) == 1
+    assert result["deny_patterns"][0]["description"] == "Ruby system exec"
+
+
+def test_validate_config_deny_not_list():
+    """deny_patterns field that is not a list logs warning, returns empty."""
+    from config import _validate_config
+
+    result = _validate_config({"deny_patterns": "not a list"})
+    assert result["deny_patterns"] == []
 
 
 def test_validate_config_empty():
@@ -199,7 +222,7 @@ def test_validate_config_empty():
     from config import _validate_config
 
     result = _validate_config({})
-    assert result == {"patterns": [], "allow_patterns": []}
+    assert result == {"patterns": [], "allow_patterns": [], "deny_patterns": []}
 
 
 def test_validate_config_patterns_not_list():
@@ -228,7 +251,7 @@ def test_load_config_missing_defaults(reset_config_cache, mock_hermes_constants)
     from config import load_config
 
     result = load_config()
-    assert result == {"patterns": [], "allow_patterns": []}
+    assert result == {"patterns": [], "allow_patterns": [], "deny_patterns": []}
 
 
 def test_load_config_with_valid_config(reset_config_cache, config_with_content, mock_hermes_constants):

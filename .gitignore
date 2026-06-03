@@ -12,3 +12,4 @@ uv.lock
 *.log
 .vscode/
 .ruff_cache/
+.plans

@@ -163,7 +163,7 @@ def _validate_config(raw: dict[str, Any]) -> dict[str, Any]:
     Returns a clean dict with 'patterns' and 'allow_patterns' lists.
     Invalid entries are logged and skipped — never raises.
     """
-    result: dict[str, Any] = {"patterns": [], "allow_patterns": []}
+    result: dict[str, Any] = {"patterns": [], "allow_patterns": [], "deny_patterns": []}
 
     # Block patterns
     raw_patterns = raw.get("patterns")
@@ -195,6 +195,21 @@ def _validate_config(raw: dict[str, Any]) -> dict[str, Any]:
             if validated:
                 result["allow_patterns"].append(validated)
 
+    # Deny patterns (v0.2.0) — matched commands are blocked immediately, no prompt
+    raw_deny = raw.get("deny_patterns")
+    if raw_deny is None:
+        pass
+    elif not isinstance(raw_deny, list):
+        logger.warning(
+            "custom-dangerous-patterns: 'deny_patterns' must be a list, got %s",
+            type(raw_deny).__name__,
+        )
+    else:
+        for i, entry in enumerate(raw_deny):
+            validated = _validate_pattern(entry, i, "deny_patterns")
+            if validated:
+                result["deny_patterns"].append(validated)
+
     return result
 
 
@@ -222,17 +237,19 @@ def load_config(force: bool = False) -> dict[str, Any]:
     raw = _load_yaml(path)
 
     if raw is None:
-        result = {"patterns": [], "allow_patterns": []}
+        result = {"patterns": [], "allow_patterns": [], "deny_patterns": []}
     else:
         result = _validate_config(raw)
 
     n_block = len(result["patterns"])
     n_allow = len(result["allow_patterns"])
-    if n_block or n_allow:
+    n_deny = len(result["deny_patterns"])
+    if n_block or n_allow or n_deny:
         logger.info(
-            "custom-dangerous-patterns: loaded %d block, %d allow patterns from %s",
+            "custom-dangerous-patterns: loaded %d block, %d allow, %d deny patterns from %s",
             n_block,
             n_allow,
+            n_deny,
             path,
         )
 
