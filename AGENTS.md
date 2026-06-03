@@ -25,27 +25,40 @@ Hermes loads plugins as `hermes_plugins.<slug>` packages. Absolute imports again
 
 `config.py` has a module-level `_config_cache`. Calling `load_config()` a second time returns the cached dict. The `force=True` parameter exists **only** for testing — mid-session config edits are silently ignored.
 
-### No tests exist
+### Tests exist under tests/
 
-The repo has zero tests. SPEC.md describes test categories but nothing is implemented. Any test work starts from scratch under `tests/` with `pytest`.
+The repo has a comprehensive test suite under `tests/` using pytest. Tests cover config loading/validation, pattern compilation/matching, and plugin registration logic. See the test files for coverage details.
 
 ### Pattern injection must happen before `tools.approval` is imported
 
 The `register()` function appends to `DANGEROUS_PATTERNS` / `DANGEROUS_PATTERNS_COMPILED` directly. If `tools.approval` is imported before the plugin registers, the injected patterns won't appear in the compiled list. Hermes's normal load order (plugins before tools) makes this work, but it's not verified at runtime.
 
-## Evaluation order (for understanding behavior)
+## Evaluation order (runtime, for understanding behavior)
+
+Deny patterns are checked by a wrapper around `check_all_command_guards()` that runs BEFORE the original function. This means deny patterns cannot be bypassed by `--yolo` or `mode=off`.
+
+Each check is tagged with its source:
+- `[Plugin]` — this plugin's custom checks
+- `[Hermes]` — Hermes Agent's built-in checks
 
 ```
-1. Hardline (unconditional block — rm -rf /, mkfs, etc.)
-2. Sudo stdin guard (unconditional block)
-3. Yolo / mode=off (bypass all)
-4. Allow patterns (custom)  ← agent can modify this
-5. Block patterns (custom)  ← agent can modify this
-6. Built-in DANGEROUS_PATTERNS
-7. Tirith security scan
+ 1. [Plugin]  Deny patterns (custom)        → BLOCKED immediately, no prompt
+               (wraps original check_all_command_guards)
+ 2. [Hermes]  Hardline check                → blocked unconditionally
+ 3. [Hermes]  Sudo stdin guard              → blocked unconditionally
+ 4. [Hermes]  Yolo / mode=off               → bypasses steps 5-7
+ 5. [Plugin]  Allow patterns (custom)       → command runs, no prompt (allow wins)
+ 6. detect_dangerous_command():             — same approval prompt for both —
+    a. [Plugin]  Block patterns (custom)    → [o]nce/[s]ession/[a]lways/[d]eny
+    b. [Hermes]  Built-in patterns          → [o]nce/[s]ession/[a]lways/[d]eny
+ 7. [Hermes]  Tirith security scan          → approval prompt if findings
 ```
 
-Allow wins over block. If a command matches both, no prompt.
+**Key rules:**
+- **Allow wins over block.** If a command matches both an allow pattern and a block pattern, allow wins and no prompt is shown.
+- **Deny wins over allow.** Deny patterns are checked before allow patterns. If a command matches a deny pattern, it is blocked before allow patterns are even evaluated.
+- **Deny is immediate-block; block is approval-prompt.** Block patterns and built-in patterns both go through the same `detect_dangerous_command()` approval flow. Deny patterns skip it entirely.
+- **Deny bypasses yolo.** Deny patterns are evaluated outside the original guard function, so `--yolo` does not bypass them. Deny patterns are evaluated outside the original guard function, so `--yolo` does not bypass them.
 
 ## Testing safety
 
