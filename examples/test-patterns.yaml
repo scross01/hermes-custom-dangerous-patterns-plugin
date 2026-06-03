@@ -1,0 +1,80 @@
+# Test patterns for Hermes custom-dangerous-patterns plugin.
+#
+# These patterns are deliberately safe and disabled by default.
+# Enable them to exercise the approval/blocking flow without
+# using real dangerous commands.
+#
+# All patterns use the [TEST] prefix and group: testing tag.
+# Enable via CLI: hermes custom-patterns enable --group testing
+# Or: set enabled: true on individual patterns.
+
+patterns:
+  # ── Simple approval-prompt test ──────────────────────────────────
+  - pattern: '\becho\s+["\x27]this\s+is\s+dangerous["\x27]'
+    description: '[TEST] Echo with danger text -- use to test approval prompt'
+    enabled: false
+    group: testing
+    examples:
+      - "echo 'this is dangerous'"
+      - 'echo "this is dangerous"'
+
+  # ── Network test (safe target) ───────────────────────────────────
+  - pattern: '\bping\s+-c\s+99999\b'
+    description: '[TEST] Excessive ping -- use to test approval prompt'
+    enabled: false
+    group: testing
+    examples:
+      - 'ping -c 99999 8.8.8.8'
+
+  # ── Process test (safe) ──────────────────────────────────────────
+  - pattern: '\bsleep\s+99999\b'
+    description: '[TEST] Long sleep -- use to test approval prompt'
+    enabled: false
+    group: testing
+    examples:
+      - 'sleep 99999'
+
+  # ── File operation test (scoped to /tmp/) ────────────────────────
+  - pattern: '\brm\s+-rf\s+/tmp/test_\w+\b'
+    description: '[TEST] Scoped rm in /tmp -- safe to test blocking logic'
+    enabled: false
+    group: testing
+    examples:
+      - 'rm -rf /tmp/test_myapp'
+      - 'rm -rf /tmp/test_data'
+
+  # ── Database test (scoped to test_ tables) ───────────────────────
+  - pattern: '\bDROP\s+TABLE\s+test_\w+\b'
+    description: '[TEST] Scoped DROP on test tables -- safe to test blocking logic'
+    enabled: false
+    group: testing
+    examples:
+      - 'DROP TABLE test_users'
+      - 'DROP TABLE test_data'
+
+  # ── Copy test (scoped to /tmp/) ──────────────────────────────────
+  - pattern: '\bcp\s+/tmp/source_test\s+/tmp/dest_test\b'
+    description: '[TEST] Scoped copy in /tmp -- safe to test blocking logic'
+    enabled: false
+    group: testing
+    examples:
+      - 'cp /tmp/source_test /tmp/dest_test'
+
+allow_patterns:
+  # ── Allow-pattern demonstration ──────────────────────────────────
+  - pattern: '\becho\s+["\x27](this\s+is\s+safe|hello\s+world)["\x27]'
+    description: '[TEST] Safe echo -- demonstrate allow pattern behavior'
+    enabled: false
+    group: testing
+    examples:
+      - "echo 'this is safe'"
+      - 'echo "hello world"'
+
+deny_patterns:
+  # ── Deny-pattern demonstration ───────────────────────────────────
+  - pattern: '\becho\s+["\x27]this\s+is\s+blocked["\x27]'
+    description: '[TEST] Echo with blocked text -- demonstrate deny pattern behavior'
+    enabled: false
+    group: testing
+    examples:
+      - "echo 'this is blocked'"
