@@ -43,7 +43,8 @@ def _resolve_config_path() -> Path:
 
     Resolution order:
       1. HERMES_CUSTOM_PATTERNS_PATH env var
-      2. ~/.hermes/custom-dangerous-patterns.yaml
+      2. ~/.hermes/custom-dangerous-patterns.yaml (single file)
+      3. ~/.hermes/custom-dangerous-patterns.d/ (directory of YAML files)
     """
     env_path = os.environ.get(_ENV_OVERRIDE, "").strip()
     if env_path:
@@ -51,10 +52,19 @@ def _resolve_config_path() -> Path:
 
     try:
         from hermes_constants import get_hermes_home
-
-        return get_hermes_home() / _DEFAULT_CONFIG_FILENAME
+        hermes_home = get_hermes_home()
     except ImportError:
-        return Path.home() / ".hermes" / _DEFAULT_CONFIG_FILENAME
+        hermes_home = Path.home() / ".hermes"
+
+    single_file = hermes_home / _DEFAULT_CONFIG_FILENAME
+    if single_file.is_file():
+        return single_file
+
+    dir_path = hermes_home / "custom-dangerous-patterns.d"
+    if dir_path.is_dir():
+        return dir_path
+
+    return single_file  # return default even if missing (will log warning)
 
 
 # ---------------------------------------------------------------------------

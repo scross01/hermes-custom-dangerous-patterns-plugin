@@ -192,6 +192,20 @@ def _patch_deny_handler(deny_checker, allow_checker=None) -> None:
     _patched.__qualname__ = func_name
     setattr(approval, func_name, _patched)
 
+    # Also patch the local alias in terminal_tool.py which imports
+    # check_all_command_guards as _check_all_guards_impl at module level.
+    # Without this, terminal_tool calls the original (unpatched) function.
+    try:
+        from tools import terminal_tool as _tt
+        if hasattr(_tt, "_check_all_guards_impl"):
+            _tt._check_all_guards_impl = _patched
+            logger.info(
+                "custom-dangerous-patterns: also patched "
+                "terminal_tool._check_all_guards_impl"
+            )
+    except ImportError:
+        pass
+
 
 def _patch_detect_function_for_deny(deny_checker, allow_checker=None) -> None:
     """Fallback: inject allow-then-deny check into detect_dangerous_command.
