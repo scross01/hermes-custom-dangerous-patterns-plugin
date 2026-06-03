@@ -1,0 +1,10 @@
+patterns:
+  - pattern: '\bvultr\b'
+    description: 'Vultr CLI command'
+    examples:
+      - 'vultr account info'
+      - 'vultr instance list'
+
+allow_patterns:
+  - pattern: '\bvultr\s+account\s+info\b'
+    description: 'Read-only Vultr commands'

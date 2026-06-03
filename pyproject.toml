@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hermes-custom-dangerous-patterns"
+version = "0.1.0"
+description = "Hermes Agent plugin for custom dangerous command patterns"
+requires-python = ">=3.11"
+dependencies = ["PyYAML"]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8",
+    "pytest-cov>=5",
+    "ruff>=0.9",
+]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W", "UP", "YTT"]
+
+[tool.ruff.lint.per-file-ignores]
+# Project directory must be named with hyphens for Hermes plugin discovery
+"__init__.py" = ["N999"]
+
+[tool.ruff.format]
+quote-style = "double"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-v --tb=short"
+
+[tool.coverage.run]
+source = ["."]
+omit = ["tests/*"]

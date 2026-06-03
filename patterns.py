@@ -8,18 +8,18 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
 _RE_FLAGS = re.IGNORECASE | re.DOTALL
 
 # Module-level compiled patterns, set once by compile_all().
-_block_compiled: List[Tuple[re.Pattern, str]] = []
-_allow_compiled: List[Tuple[re.Pattern, str]] = []
+_block_compiled: list[tuple[re.Pattern, str]] = []
+_allow_compiled: list[tuple[re.Pattern, str]] = []
 
 
-def compile_block_patterns(raw_patterns: List[Dict[str, str]]) -> List[Tuple[re.Pattern, str]]:
+def compile_block_patterns(raw_patterns: list[dict[str, str]]) -> list[tuple[re.Pattern, str]]:
     """Compile block patterns from config into (compiled_regex, description).
 
     These get appended to DANGEROUS_PATTERNS / DANGEROUS_PATTERNS_COMPILED.
@@ -34,12 +34,13 @@ def compile_block_patterns(raw_patterns: List[Dict[str, str]]) -> List[Tuple[re.
         except re.error as exc:
             logger.warning(
                 "custom-dangerous-patterns: skipping invalid block regex %r: %s",
-                pattern_str, exc,
+                pattern_str,
+                exc,
             )
     return compiled
 
 
-def compile_allow_patterns(raw_patterns: List[Dict[str, str]]) -> List[Tuple[re.Pattern, str]]:
+def compile_allow_patterns(raw_patterns: list[dict[str, str]]) -> list[tuple[re.Pattern, str]]:
     """Compile allow patterns from config into (compiled_regex, description).
 
     These are checked BEFORE block patterns. A matching allow pattern
@@ -54,12 +55,13 @@ def compile_allow_patterns(raw_patterns: List[Dict[str, str]]) -> List[Tuple[re.
         except re.error as exc:
             logger.warning(
                 "custom-dangerous-patterns: skipping invalid allow regex %r: %s",
-                pattern_str, exc,
+                pattern_str,
+                exc,
             )
     return compiled
 
 
-def compile_all(config: Dict[str, Any]) -> None:
+def compile_all(config: dict[str, Any]) -> None:
     """Compile all patterns from config and store in module globals.
 
     Call once during plugin registration.
@@ -69,7 +71,7 @@ def compile_all(config: Dict[str, Any]) -> None:
     _allow_compiled = compile_allow_patterns(config.get("allow_patterns", []))
 
 
-def is_allow_pattern(command: str) -> Optional[str]:
+def is_allow_pattern(command: str) -> str | None:
     """Check if a command matches any allow pattern.
 
     Uses the same normalization as approval.py's detection.
@@ -90,7 +92,7 @@ def is_allow_pattern(command: str) -> Optional[str]:
     return None
 
 
-def get_block_patterns() -> List[Tuple[re.Pattern, str]]:
+def get_block_patterns() -> list[tuple[re.Pattern, str]]:
     """Return the compiled block patterns (for injection into DANGEROUS_PATTERNS)."""
     return list(_block_compiled)
 
@@ -103,12 +105,14 @@ def _normalize(command: str) -> str:
     """
     try:
         from tools.ansi_strip import strip_ansi
+
         command = strip_ansi(command)
     except ImportError:
         # Fallback: strip common ANSI sequences
-        command = re.sub(r'\x1b\[[0-9;]*[a-zA-Z]', '', command)
+        command = re.sub(r"\x1b\[[0-9;]*[a-zA-Z]", "", command)
 
-    command = command.replace('\x00', '')
+    command = command.replace("\x00", "")
     import unicodedata
-    command = unicodedata.normalize('NFKC', command)
+
+    command = unicodedata.normalize("NFKC", command)
     return command

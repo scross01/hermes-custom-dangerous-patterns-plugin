@@ -1,0 +1,5 @@
+patterns:
+  - pattern: '[invalid'
+    description: 'Bad regex pattern'
+  - pattern: '\bvultr\b'
+    description: 'Good pattern'

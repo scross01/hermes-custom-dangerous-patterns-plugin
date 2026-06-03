@@ -12,7 +12,7 @@ from __future__ import annotations
 import logging
 import os
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -24,12 +24,13 @@ _DEFAULT_CONFIG_FILENAME = "custom-dangerous-patterns.yaml"
 _ENV_OVERRIDE = "HERMES_CUSTOM_PATTERNS_PATH"
 
 # Module-level cache — loaded once per process, never stale within a run.
-_config_cache: Optional[Dict[str, Any]] = None
+_config_cache: dict[str, Any] | None = None
 
 
 # ---------------------------------------------------------------------------
 # Path resolution
 # ---------------------------------------------------------------------------
+
 
 def _resolve_config_path() -> Path:
     """Return the path to the user's custom patterns config file.
@@ -44,6 +45,7 @@ def _resolve_config_path() -> Path:
 
     try:
         from hermes_constants import get_hermes_home
+
         return get_hermes_home() / _DEFAULT_CONFIG_FILENAME
     except ImportError:
         return Path.home() / ".hermes" / _DEFAULT_CONFIG_FILENAME
@@ -53,7 +55,8 @@ def _resolve_config_path() -> Path:
 # YAML loading (lazy import — yaml is optional at module level)
 # ---------------------------------------------------------------------------
 
-def _load_yaml(path: Path) -> Optional[Dict[str, Any]]:
+
+def _load_yaml(path: Path) -> dict[str, Any] | None:
     """Parse a YAML file. Returns None on missing/unreadable/invalid."""
     if not path.is_file():
         logger.debug("custom-dangerous-patterns: config not found at %s", path)
@@ -73,14 +76,16 @@ def _load_yaml(path: Path) -> Optional[Dict[str, Any]]:
     except Exception as exc:
         logger.warning(
             "custom-dangerous-patterns: failed to read config at %s: %s",
-            path, exc,
+            path,
+            exc,
         )
         return None
 
     if not isinstance(raw, dict):
         logger.warning(
             "custom-dangerous-patterns: config at %s is not a YAML mapping (got %s)",
-            path, type(raw).__name__,
+            path,
+            type(raw).__name__,
         )
         return None
 
@@ -91,12 +96,15 @@ def _load_yaml(path: Path) -> Optional[Dict[str, Any]]:
 # Validation
 # ---------------------------------------------------------------------------
 
-def _validate_pattern(entry: Any, index: int, field: str) -> Optional[Dict[str, str]]:
+
+def _validate_pattern(entry: Any, index: int, field: str) -> dict[str, str] | None:
     """Validate a single pattern entry. Returns normalized dict or None."""
     if not isinstance(entry, dict):
         logger.warning(
             "custom-dangerous-patterns: %s[%d] must be a mapping, got %s — skipping",
-            field, index, type(entry).__name__,
+            field,
+            index,
+            type(entry).__name__,
         )
         return None
 
@@ -104,17 +112,22 @@ def _validate_pattern(entry: Any, index: int, field: str) -> Optional[Dict[str, 
     if not isinstance(pattern, str) or not pattern.strip():
         logger.warning(
             "custom-dangerous-patterns: %s[%d] missing required 'pattern' string — skipping",
-            field, index,
+            field,
+            index,
         )
         return None
 
     import re
+
     try:
         re.compile(pattern, re.IGNORECASE | re.DOTALL)
     except re.error as exc:
         logger.warning(
             "custom-dangerous-patterns: %s[%d] invalid regex %r: %s — skipping",
-            field, index, pattern, exc,
+            field,
+            index,
+            pattern,
+            exc,
         )
         return None
 
@@ -133,13 +146,13 @@ def _validate_pattern(entry: Any, index: int, field: str) -> Optional[Dict[str, 
     }
 
 
-def _validate_config(raw: Dict[str, Any]) -> Dict[str, Any]:
+def _validate_config(raw: dict[str, Any]) -> dict[str, Any]:
     """Validate and normalize the raw config dict.
 
     Returns a clean dict with 'patterns' and 'allow_patterns' lists.
     Invalid entries are logged and skipped — never raises.
     """
-    result: Dict[str, Any] = {"patterns": [], "allow_patterns": []}
+    result: dict[str, Any] = {"patterns": [], "allow_patterns": []}
 
     # Block patterns
     raw_patterns = raw.get("patterns")
@@ -178,7 +191,8 @@ def _validate_config(raw: Dict[str, Any]) -> Dict[str, Any]:
 # Public API
 # ---------------------------------------------------------------------------
 
-def load_config(force: bool = False) -> Dict[str, Any]:
+
+def load_config(force: bool = False) -> dict[str, Any]:
     """Load, validate, and cache the custom patterns config.
 
     Returns a dict with keys:
@@ -206,7 +220,9 @@ def load_config(force: bool = False) -> Dict[str, Any]:
     if n_block or n_allow:
         logger.info(
             "custom-dangerous-patterns: loaded %d block, %d allow patterns from %s",
-            n_block, n_allow, path,
+            n_block,
+            n_allow,
+            path,
         )
 
     _config_cache = result

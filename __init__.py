@@ -17,8 +17,7 @@ an allow pattern, it bypasses ALL detection (custom + built-in).
 from __future__ import annotations
 
 import logging
-import re
-from typing import Any, Dict, Optional, Tuple
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -36,7 +35,6 @@ def register(ctx: Any) -> None:
     # ── 1. Load and compile config ──────────────────────────────────
     config = load_config()
     raw_block = config.get("patterns", [])
-    raw_allow = config.get("allow_patterns", [])
 
     if not raw_block:
         logger.info("custom-dangerous-patterns: no patterns configured, plugin idle")
@@ -76,6 +74,7 @@ def register(ctx: Any) -> None:
 # Monkey-patch
 # ---------------------------------------------------------------------------
 
+
 def _patch_detect_function(allow_checker) -> None:
     """Wrap detect_dangerous_command to skip commands matching allow patterns.
 
@@ -87,13 +86,14 @@ def _patch_detect_function(allow_checker) -> None:
 
     _original = approval.detect_dangerous_command
 
-    def _patched(command: str) -> Tuple[bool, Optional[str], Optional[str]]:
+    def _patched(command: str) -> tuple[bool, str | None, str | None]:
         # Check allow patterns first
         allow_match = allow_checker(command)
         if allow_match is not None:
             logger.debug(
                 "custom-dangerous-patterns: command exempt via allow pattern (%s): %s",
-                allow_match, command[:80],
+                allow_match,
+                command[:80],
             )
             return (False, None, None)
 

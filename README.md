@@ -388,7 +388,7 @@ hermes-custom-dangerous-patterns-plugin/
 
 ## Requirements
 
-- Python 3.9+
+- Python 3.11+
 - [Hermes Agent](https://github.com/NousResearch/hermes-agent) (tested with 0.15.1)
 - PyYAML (`pip install pyyaml`) — for config loading
 
