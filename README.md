@@ -19,7 +19,7 @@ This plugin lets you define **your own patterns** in a YAML config file. They ge
 ### Step 1: Clone or download the plugin
 
 ```bash
-git clone https://github.com/stephencross/hermes-custom-dangerous-patterns-plugin.git \
+git clone https://github.com/scross01/hermes-custom-dangerous-patterns-plugin.git \
     ~/.hermes/plugins/custom-dangerous-patterns
 ```
 
