@@ -542,3 +542,62 @@ def test_load_config_skip_integrity(reset_config_cache, config_with_content, moc
 
     result = load_config(integrity_check=False)
     assert len(result["patterns"]) == 2
+
+
+# ---------------------------------------------------------------------------
+# Directory config (v0.2.0)
+# ---------------------------------------------------------------------------
+
+
+def test_load_yaml_directory_mode(tmp_path):
+    """Directory with *.yaml files merges them in alphabetical order."""
+    from config import _load_yaml
+
+    d = tmp_path / "config.d"
+    d.mkdir()
+    (d / "00-block.yaml").write_text(
+        "patterns:\n  - pattern: '\\\\bvultr\\\\b'\n    description: 'Vultr CLI'",
+        encoding="utf-8",
+    )
+    (d / "10-allow.yaml").write_text(
+        "allow_patterns:\n  - pattern: '\\\\bvultr\\\\s+info\\\\b'\n    description: 'Vultr info'",
+        encoding="utf-8",
+    )
+
+    result = _load_yaml(d)
+    assert result is not None
+    assert len(result["patterns"]) == 1
+    assert len(result["allow_patterns"]) == 1
+    assert result["patterns"][0]["description"] == "Vultr CLI"
+
+
+def test_load_yaml_directory_empty(tmp_path):
+    """Empty directory returns None."""
+    from config import _load_yaml
+
+    d = tmp_path / "empty.d"
+    d.mkdir()
+    result = _load_yaml(d)
+    assert result is None
+
+
+def test_load_yaml_directory_merges_lists(tmp_path):
+    """Multiple files with the same key append their list entries."""
+    from config import _load_yaml
+
+    d = tmp_path / "config.d"
+    d.mkdir()
+    (d / "00-block.yaml").write_text(
+        "patterns:\n  - pattern: '\\\\bvultr\\\\b'\n    description: 'Vultr CLI'",
+        encoding="utf-8",
+    )
+    (d / "10-more.yaml").write_text(
+        "patterns:\n  - pattern: '\\\\baws\\\\b'\n    description: 'AWS CLI'",
+        encoding="utf-8",
+    )
+
+    result = _load_yaml(d)
+    assert result is not None
+    assert len(result["patterns"]) == 2
+    assert result["patterns"][0]["description"] == "Vultr CLI"
+    assert result["patterns"][1]["description"] == "AWS CLI"

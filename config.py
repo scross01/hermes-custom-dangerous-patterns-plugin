@@ -63,7 +63,47 @@ def _resolve_config_path() -> Path:
 
 
 def _load_yaml(path: Path) -> dict[str, Any] | None:
-    """Parse a YAML file. Returns None on missing/unreadable/invalid."""
+    """Parse a YAML file or directory of *.yaml files.
+
+    If path is a directory, loads all *.yaml files in alphabetical
+    order and merges them (later files' lists append, later files'
+    scalars override). Returns None on missing/unreadable/invalid.
+    """
+    # Directory mode (v0.2.0): load *.yaml files in alphabetical order
+    if path.is_dir():
+        yaml_files = sorted(path.glob("*.yaml"))
+        if not yaml_files:
+            logger.debug(
+                "custom-dangerous-patterns: no *.yaml files in directory %s",
+                path,
+            )
+            return None
+        merged: dict[str, Any] = {}
+        for yf in yaml_files:
+            single = _load_single_yaml(yf)
+            if single:
+                for key, val in single.items():
+                    if key in merged and isinstance(merged[key], list) and isinstance(val, list):
+                        merged[key].extend(val)
+                    else:
+                        merged[key] = val
+                merged.setdefault("patterns", [])
+                merged.setdefault("allow_patterns", [])
+                merged.setdefault("deny_patterns", [])
+        if merged:
+            logger.info(
+                "custom-dangerous-patterns: loaded config from %d files in %s",
+                len(yaml_files),
+                path,
+            )
+        return merged if merged else None
+
+    # Single file mode
+    return _load_single_yaml(path)
+
+
+def _load_single_yaml(path: Path) -> dict[str, Any] | None:
+    """Parse a single YAML file. Returns None on missing/unreadable/invalid."""
     if not path.is_file():
         logger.debug("custom-dangerous-patterns: config not found at %s", path)
         return None
@@ -72,7 +112,7 @@ def _load_yaml(path: Path) -> dict[str, Any] | None:
         import yaml
     except ImportError:
         logger.warning(
-            "custom-dangerous-patterns: PyYAML not installed — cannot load config. "
+            "custom-dangerous-patterns: PyYAML not installed -- cannot load config. "
             "Install with: pip install pyyaml"
         )
         return None
