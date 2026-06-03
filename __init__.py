@@ -28,8 +28,8 @@ _allow_patterns: list = []
 
 def register(ctx: Any) -> None:
     """Plugin entry point. Called by Hermes at startup."""
-    from config import load_config
-    from patterns import compile_all, get_block_patterns, is_allow_pattern
+    from .config import load_config
+    from .patterns import compile_all, get_block_patterns, is_allow_pattern
 
     global _allow_patterns
 

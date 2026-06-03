@@ -42,8 +42,11 @@ def _resolve_config_path() -> Path:
     if env_path:
         return Path(env_path).expanduser()
 
-    from hermes_constants import get_hermes_home
-    return get_hermes_home() / _DEFAULT_CONFIG_FILENAME
+    try:
+        from hermes_constants import get_hermes_home
+        return get_hermes_home() / _DEFAULT_CONFIG_FILENAME
+    except ImportError:
+        return Path.home() / ".hermes" / _DEFAULT_CONFIG_FILENAME
 
 
 # ---------------------------------------------------------------------------
