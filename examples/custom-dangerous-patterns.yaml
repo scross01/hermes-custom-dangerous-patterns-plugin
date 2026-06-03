@@ -40,6 +40,18 @@ patterns:
     examples:
       - 'gcloud compute instances delete my-vm --zone=us-central1-a'
 
+  - pattern: '\boci\s+(compute\s+instance\s+terminate|database\s+db\s+system\s+delete|network\s+vcn\s+delete)\b'
+    description: 'Oracle Cloud destructive command'
+    examples:
+      - 'oci compute instance terminate --instance-id ocid1.instance.oc1..aaaaaaaa'
+      - 'oci database db-system delete --db-system-id ocid1.dbsystem.oc1..aaaaaaaa'
+
+  - pattern: '\bdoctl\s+(compute\s+droplet\s+delete|kubernetes\s+cluster\s+delete|databases\s+delete)\b'
+    description: 'DigitalOcean destructive command'
+    examples:
+      - 'doctl compute droplet delete 12345678'
+      - 'doctl kubernetes cluster delete my-cluster'
+
   - pattern: '\bkubectl\s+delete\s+namespace\b'
     description: 'Kubernetes namespace deletion'
     examples:
@@ -84,9 +96,15 @@ allow_patterns:
   - pattern: '\bterraform\s+(plan|state\s+list|output)\b'
     description: 'Terraform read-only commands'
 
+  - pattern: '\boci\s+(compute\s+instance\s+list|network\s+vcn\s+list|database\s+db\s+system\s+list)\b'
+    description: 'Oracle Cloud read-only commands'
+
+  - pattern: '\bdoctl\s+(compute\s+droplet\s+list|kubernetes\s+cluster\s+list|databases\s+list)\b'
+    description: 'DigitalOcean read-only commands'
+
   # ── Help and utility (safe) ─────────────────────────────────────
-  - pattern: '\b(vultr|gcloud|aws|terraform|kubectl)\s+(-h|--help|help)\b'
+  - pattern: '\b(vultr|gcloud|aws|terraform|kubectl|oci|doctl)\s+(-h|--help|help)\b'
     description: 'Help flags are safe'
 
-  - pattern: '\b(vultr|gcloud|aws|terraform)\s+completion\b'
+  - pattern: '\b(vultr|gcloud|aws|terraform|oci|doctl)\s+completion\b'
     description: 'Shell completion scripts are safe'
