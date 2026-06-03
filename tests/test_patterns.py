@@ -51,6 +51,32 @@ def test_compile_block_patterns_empty():
     assert compile_block_patterns([]) == []
 
 
+def test_compile_block_patterns_skips_disabled():
+    """Patterns with enabled: false are skipped."""
+    from patterns import compile_block_patterns
+
+    raw = [
+        {"pattern": r"\bvultr\b", "description": "Vultr", "enabled": False},
+        {"pattern": r"\baws\b", "description": "AWS"},
+    ]
+    compiled = compile_block_patterns(raw)
+    assert len(compiled) == 1
+    assert compiled[0][1] == "AWS"
+
+
+def test_compile_allow_patterns_skips_disabled():
+    """Allow patterns with enabled: false are skipped."""
+    from patterns import compile_allow_patterns
+
+    raw = [
+        {"pattern": r"\bvultr\b", "description": "Vultr", "enabled": False},
+        {"pattern": r"\baws\b", "description": "AWS"},
+    ]
+    compiled = compile_allow_patterns(raw)
+    assert len(compiled) == 1
+    assert compiled[0][1] == "AWS"
+
+
 # ---------------------------------------------------------------------------
 # compile_allow_patterns
 # ---------------------------------------------------------------------------

@@ -23,10 +23,13 @@ def compile_block_patterns(raw_patterns: list[dict[str, str]]) -> list[tuple[re.
     """Compile block patterns from config into (compiled_regex, description).
 
     These get appended to DANGEROUS_PATTERNS / DANGEROUS_PATTERNS_COMPILED.
-    Invalid regexes are logged and skipped.
+    Invalid regexes are logged and skipped. Disabled patterns (enabled: false)
+    are skipped without warning — they're intentionally paused.
     """
     compiled = []
     for entry in raw_patterns:
+        if not entry.get("enabled", True):
+            continue
         pattern_str = entry["pattern"]
         description = entry.get("description", pattern_str)
         try:
@@ -45,9 +48,12 @@ def compile_allow_patterns(raw_patterns: list[dict[str, str]]) -> list[tuple[re.
 
     These are checked BEFORE block patterns. A matching allow pattern
     exempts the command from ALL approval checks (block + built-in).
+    Disabled patterns (enabled: false) are skipped.
     """
     compiled = []
     for entry in raw_patterns:
+        if not entry.get("enabled", True):
+            continue
         pattern_str = entry["pattern"]
         description = entry.get("description", pattern_str)
         try:

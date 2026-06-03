@@ -139,10 +139,21 @@ def _validate_pattern(entry: Any, index: int, field: str) -> dict[str, str] | No
     if not isinstance(examples, list):
         examples = []
 
+    # Optional fields (v0.2.0)
+    enabled = entry.get("enabled", True)
+    if not isinstance(enabled, bool):
+        enabled = True
+
+    group = entry.get("group", "")
+    if not isinstance(group, str):
+        group = str(group)
+
     return {
         "pattern": pattern.strip(),
         "description": description.strip(),
         "examples": examples,
+        "enabled": enabled,
+        "group": group.strip(),
     }
 
 

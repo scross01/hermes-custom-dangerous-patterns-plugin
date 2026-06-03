@@ -105,6 +105,47 @@ def test_validate_pattern_valid():
     assert result["pattern"] == r"\bvultr\b"
     assert result["description"] == "Vultr CLI"
     assert result["examples"] == ["vultr list"]
+    assert result["enabled"] is True  # default
+    assert result["group"] == ""  # default
+
+
+def test_validate_pattern_disabled():
+    """Pattern with enabled: false is preserved as disabled."""
+    from config import _validate_pattern
+
+    result = _validate_pattern(
+        {"pattern": r"\bvultr\b", "description": "Vultr CLI", "enabled": False},
+        0,
+        "patterns",
+    )
+    assert result is not None
+    assert result["enabled"] is False
+
+
+def test_validate_pattern_with_group():
+    """Pattern with group tag preserves the group."""
+    from config import _validate_pattern
+
+    result = _validate_pattern(
+        {"pattern": r"\bvultr\b", "description": "Vultr CLI", "group": "cloud"},
+        0,
+        "patterns",
+    )
+    assert result is not None
+    assert result["group"] == "cloud"
+
+
+def test_validate_pattern_enabled_non_bool_defaults_true():
+    """Non-bool enabled value defaults to True."""
+    from config import _validate_pattern
+
+    result = _validate_pattern(
+        {"pattern": r"\bvultr\b", "description": "Vultr CLI", "enabled": "yes"},
+        0,
+        "patterns",
+    )
+    assert result is not None
+    assert result["enabled"] is True
 
 
 def test_validate_pattern_not_a_dict():
