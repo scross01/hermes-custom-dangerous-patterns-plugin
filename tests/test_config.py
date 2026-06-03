@@ -148,6 +148,32 @@ def test_validate_pattern_enabled_non_bool_defaults_true():
     assert result["enabled"] is True
 
 
+def test_validate_pattern_protected():
+    """Pattern with protected: true preserves the flag."""
+    from config import _validate_pattern
+
+    result = _validate_pattern(
+        {"pattern": r"\bvultr\b", "description": "Vultr CLI", "protected": True},
+        0,
+        "patterns",
+    )
+    assert result is not None
+    assert result["protected"] is True
+
+
+def test_validate_pattern_protected_defaults_false():
+    """Pattern without protected field defaults to False."""
+    from config import _validate_pattern
+
+    result = _validate_pattern(
+        {"pattern": r"\bvultr\b", "description": "Vultr CLI"},
+        0,
+        "patterns",
+    )
+    assert result is not None
+    assert result["protected"] is False
+
+
 def test_validate_pattern_not_a_dict():
     """Non-dict entry returns None."""
     from config import _validate_pattern
@@ -300,6 +326,219 @@ patterns:
 
     from config import load_config
 
-    result = load_config()
+    result = load_config(integrity_check=False)
     assert len(result["patterns"]) == 1
     assert result["patterns"][0]["description"] == "GCP CLI"
+
+
+# ---------------------------------------------------------------------------
+# Hash / integrity (v0.2.0)
+# ---------------------------------------------------------------------------
+
+
+def test_resolve_hash_path():
+    """Hash file is alongside config in the same directory."""
+    from pathlib import Path
+    from config import _resolve_hash_path
+
+    config_path = Path("/home/user/.hermes/custom-dangerous-patterns.yaml")
+    result = _resolve_hash_path(config_path)
+    assert result == Path("/home/user/.hermes/.custom-patterns-hash")
+
+
+def test_compute_config_hash():
+    """Same text produces same hash, different text produces different hash."""
+    from config import _compute_config_hash
+
+    h1 = _compute_config_hash("patterns:\n  - pattern: test")
+    h2 = _compute_config_hash("patterns:\n  - pattern: test")
+    h3 = _compute_config_hash("patterns:\n  - pattern: other")
+    assert h1 == h2
+    assert h1 != h3
+    assert len(h1) == 64  # SHA-256 hex digest
+
+
+def test_load_hash_data_missing(tmp_path):
+    """Missing hash file returns empty dict."""
+    from config import _load_hash_data
+
+    result = _load_hash_data(tmp_path / "nonexistent.json")
+    assert result == {}
+
+
+def test_load_hash_data_valid(tmp_path):
+    """Valid hash file returns parsed data."""
+    from config import _load_hash_data
+
+    hash_path = tmp_path / "hash.json"
+    hash_path.write_text('{"config_hash": "abc123"}', encoding="utf-8")
+    result = _load_hash_data(hash_path)
+    assert result == {"config_hash": "abc123"}
+
+
+def test_save_and_load_hash_data_roundtrip(tmp_path):
+    """Saved hash data can be loaded back."""
+    from config import _save_hash_data, _load_hash_data
+
+    hash_path = tmp_path / "hash.json"
+    data = {"config_hash": "def456", "protected": {"key": "hash"}}
+    _save_hash_data(hash_path, data)
+    loaded = _load_hash_data(hash_path)
+    assert loaded == data
+
+
+def test_check_protected_patterns_missing(caplog):
+    """Missing protected pattern logs CRITICAL."""
+    from config import _check_protected_patterns
+
+    validated = {"patterns": []}
+    previous = {"protected": {"Critical Pattern": "somehash"}}
+
+    with caplog.at_level("CRITICAL"):
+        _check_protected_patterns(validated, previous)
+
+    assert any("PROTECTED PATTERN MISSING" in r.message for r in caplog.records)
+    assert any("Critical Pattern" in r.message for r in caplog.records)
+
+
+def test_check_protected_patterns_modified(caplog):
+    """Modified protected pattern regex logs CRITICAL."""
+    import hashlib
+    from config import _check_protected_patterns
+
+    validated = {
+        "patterns": [
+            {
+                "pattern": r"\bnewpattern\b",
+                "description": "Critical Pattern",
+                "protected": True,
+                "enabled": True,
+            }
+        ]
+    }
+    previous = {
+        "protected": {
+            "Critical Pattern": hashlib.sha256(
+                r"\bOldPattern\b".encode("utf-8")
+            ).hexdigest()
+        }
+    }
+
+    with caplog.at_level("CRITICAL"):
+        _check_protected_patterns(validated, previous)
+
+    assert any("PROTECTED PATTERN MODIFIED" in r.message for r in caplog.records)
+
+
+def test_check_protected_patterns_unchanged(caplog):
+    """Unchanged protected pattern logs nothing."""
+    import hashlib
+    from config import _check_protected_patterns
+
+    validated = {
+        "patterns": [
+            {
+                "pattern": r"\bvultr\b",
+                "description": "Vultr CLI",
+                "protected": True,
+                "enabled": True,
+            }
+        ]
+    }
+    previous = {
+        "protected": {
+            "Vultr CLI": hashlib.sha256(r"\bvultr\b".encode("utf-8")).hexdigest()
+        }
+    }
+
+    with caplog.at_level("CRITICAL"):
+        _check_protected_patterns(validated, previous)
+
+    assert not any("PROTECTED" in r.message for r in caplog.records)
+
+
+def test_check_protected_patterns_no_previous(caplog):
+    """No previous protected patterns logs nothing."""
+    from config import _check_protected_patterns
+
+    validated = {
+        "patterns": [
+            {
+                "pattern": r"\bvultr\b",
+                "description": "Vultr CLI",
+                "protected": True,
+                "enabled": True,
+            }
+        ]
+    }
+
+    with caplog.at_level("CRITICAL"):
+        _check_protected_patterns(validated, {})
+
+    assert not any("PROTECTED" in r.message for r in caplog.records)
+
+
+def test_check_config_integrity_hash_changed(caplog, tmp_path):
+    """Changed config hash logs WARNING on second run."""
+    import json
+    from config import _check_config_integrity
+
+    config_path = tmp_path / "config.yaml"
+    hash_path = tmp_path / ".custom-patterns-hash"
+    raw_text = "patterns:\n  - pattern: test"
+    validated = {"patterns": [{}], "allow_patterns": [], "deny_patterns": []}
+
+    # Simulate a previous session with a different config hash
+    hash_path.write_text(
+        json.dumps({"config_hash": "0000111122223333", "pattern_counts": {"patterns": 0, "allow_patterns": 0, "deny_patterns": 0}}),
+        encoding="utf-8",
+    )
+
+    with caplog.at_level("WARNING"):
+        _check_config_integrity(config_path, raw_text, validated, True)
+
+    assert any("CONFIG CHANGED" in r.message for r in caplog.records)
+
+
+def test_check_config_integrity_first_run_no_warning(caplog, tmp_path):
+    """First run (no previous hash) logs nothing about changes."""
+    from config import _check_config_integrity
+
+    config_path = tmp_path / "config.yaml"
+    raw_text = "patterns: []"
+    validated = {"patterns": [], "allow_patterns": [], "deny_patterns": []}
+
+    with caplog.at_level("WARNING"):
+        _check_config_integrity(config_path, raw_text, validated, True)
+
+    assert not any("CONFIG CHANGED" in r.message for r in caplog.records)
+
+
+def test_check_config_integrity_disabled(caplog, tmp_path):
+    """integrity_check=False skips all checks."""
+    from config import _check_config_integrity
+
+    config_path = tmp_path / "config.yaml"
+    raw_text = "patterns: []"
+    validated = {"patterns": [], "allow_patterns": [], "deny_patterns": []}
+
+    with caplog.at_level("WARNING"):
+        _check_config_integrity(config_path, raw_text, validated, False)
+
+    assert not caplog.records
+
+
+def test_load_config_with_integrity_check(reset_config_cache, config_with_content, mock_hermes_constants):
+    """load_config runs integrity checks by default."""
+    from config import load_config
+
+    result = load_config()
+    assert len(result["patterns"]) == 2
+
+
+def test_load_config_skip_integrity(reset_config_cache, config_with_content, mock_hermes_constants):
+    """load_config skips integrity when integrity_check=False."""
+    from config import load_config
+
+    result = load_config(integrity_check=False)
+    assert len(result["patterns"]) == 2
