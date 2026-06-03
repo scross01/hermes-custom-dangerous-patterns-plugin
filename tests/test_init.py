@@ -302,3 +302,49 @@ def test_register_with_deny_patterns(
     # Verify check_all_command_guards was patched (deny handler installed)
     assert approval.check_all_command_guards.__name__ == "check_all_command_guards"
     assert approval.check_all_command_guards.__qualname__ == "check_all_command_guards"
+
+
+# ---------------------------------------------------------------------------
+# _check_allow_shadowing / _patterns_overlap / _extract_tokens
+# ---------------------------------------------------------------------------
+
+
+def test_patterns_overlap_broad():
+    """Broad patterns like '.*' shadow everything."""
+    import re
+    from __init__ import _patterns_overlap
+
+    r1 = re.compile(".*")
+    r2 = re.compile(r"\brm\b")
+    assert _patterns_overlap(r1, r2) is True
+
+
+def test_patterns_overlap_token_match():
+    """Patterns with shared tokens overlap."""
+    import re
+    from __init__ import _patterns_overlap
+
+    r1 = re.compile(r"\baws\b.*")
+    r2 = re.compile(r"\baws\s+ec2\b")
+    assert _patterns_overlap(r1, r2) is True
+
+
+def test_patterns_overlap_no_match():
+    """Unrelated patterns don't overlap."""
+    import re
+    from __init__ import _patterns_overlap
+
+    r1 = re.compile(r"\bvultr\b")
+    r2 = re.compile(r"\baws\b")
+    assert _patterns_overlap(r1, r2) is False
+
+
+def test_extract_tokens():
+    """Extracts word tokens >= 3 chars from regex."""
+    from __init__ import _extract_tokens
+
+    tokens = _extract_tokens(r"\baws\s+(ec2|s3|rds)\b")
+    assert "aws" in tokens
+    assert "ec2" in tokens
+    assert "rds" in tokens
+    # s3 is only 2 chars, filtered out by >=3 token rule

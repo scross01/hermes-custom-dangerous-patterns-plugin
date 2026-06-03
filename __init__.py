@@ -73,6 +73,8 @@ def register(ctx: Any) -> None:
             "%d allow patterns",
             allow_count,
         )
+        # Check for allow patterns that shadow built-in dangerous patterns
+        _check_allow_shadowing(config, is_allow_pattern)
 
     # 4. Monkey-patch check_all_command_guards for deny patterns
     deny_patterns = config.get("deny_patterns", [])
@@ -235,3 +237,91 @@ def _patch_detect_function_for_deny(deny_checker, allow_checker=None) -> None:
     _patched.__name__ = "detect_dangerous_command"
     _patched.__qualname__ = "detect_dangerous_command"
     approval.detect_dangerous_command = _patched
+
+
+# ---------------------------------------------------------------------------
+# Allow shadowing check (v0.2.0)
+# ---------------------------------------------------------------------------
+
+
+def _check_allow_shadowing(config: dict, is_allow_pattern) -> None:
+    """Warn when allow patterns could bypass built-in dangerous patterns.
+
+    For each enabled allow pattern, checks if it matches any built-in
+    DANGEROUS_PATTERNS entry without a corresponding custom block pattern.
+    Logs a WARNING explaining the built-in bypass risk.
+    """
+    import re
+
+    from tools.approval import DANGEROUS_PATTERNS_COMPILED
+
+    from .patterns import compile_allow_patterns
+
+    allow_compiled = compile_allow_patterns(config.get("allow_patterns", []))
+    block_raw = config.get("patterns", [])
+    block_enabled = [p for p in block_raw if p.get("enabled", True)]
+
+    for allow_re, allow_desc in allow_compiled:
+        # Check if this allow pattern matches any built-in dangerous pattern
+        shadowed = []
+        for builtin_re, builtin_desc in DANGEROUS_PATTERNS_COMPILED:
+            if _patterns_overlap(allow_re, builtin_re):
+                shadowed.append(builtin_desc)
+
+        if shadowed:
+            # Check if a custom block pattern would also match these commands
+            covered = False
+            for entry in block_enabled:
+                try:
+                    block_re = re.compile(
+                        entry["pattern"], re.IGNORECASE | re.DOTALL
+                    )
+                    if all(
+                        _patterns_overlap(block_re, builtin_re)
+                        for builtin_re, _ in DANGEROUS_PATTERNS_COMPILED
+                        if _patterns_overlap(allow_re, builtin_re)
+                    ):
+                        covered = True
+                        break
+                except re.error:
+                    pass
+
+            if not covered:
+                logger.warning(
+                    "custom-dangerous-patterns: ALLOW SHADOWING -- allow "
+                    "pattern '%s' (%s) may bypass built-in dangerous "
+                    "patterns: %s. Consider adding a corresponding custom "
+                    "block pattern to scope the exemption.",
+                    allow_re.pattern,
+                    allow_desc,
+                    ", ".join(shadowed[:3])
+                    + ("..." if len(shadowed) > 3 else ""),
+                )
+
+
+def _patterns_overlap(re1: "re.Pattern", re2: "re.Pattern") -> bool:
+    """Check if two compiled regex patterns can match overlapping strings.
+
+    A simple heuristic: if the patterns share word-like tokens of length
+    >= 3, they likely overlap. Broad patterns like '.*' shadow everything.
+    Not perfect, but catches the most dangerous cases.
+    """
+    p1, p2 = re1.pattern, re2.pattern
+    # Broad patterns shadow everything
+    if p1 in (".*", ".+", "^.*$"):
+        return True
+    # Check token overlap
+    tokens1 = set(_extract_tokens(p1))
+    tokens2 = set(_extract_tokens(p2))
+    return bool(tokens1 & tokens2)
+
+
+def _extract_tokens(pattern: str) -> list[str]:
+    """Extract word-like tokens from a regex pattern for overlap check."""
+    import re
+
+    # Remove word-boundary markers (e.g., \baws -> aws)
+    cleaned = re.sub(r"\\b", " ", pattern)
+    # Remove other regex metacharacters
+    cleaned = re.sub(r"[\\*+?.^$()\[\]{}|]", " ", cleaned)
+    return [t for t in cleaned.split() if len(t) >= 3]
