@@ -7,5 +7,8 @@ dist/
 build/
 .venv/
 venv/
+uv.lock
 .env
 *.log
+.vscode/
+.ruff_cache/

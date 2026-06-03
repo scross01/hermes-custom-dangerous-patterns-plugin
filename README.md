@@ -25,7 +25,29 @@ This plugin lets you define **your own patterns** in a YAML config file. They ge
 
 ## Installation
 
-### Step 1: Clone or download the plugin
+### Recommended: Install via Hermes CLI
+
+```bash
+hermes plugins install scross01/hermes-custom-dangerous-patterns-plugin
+hermes plugins enable custom-dangerous-patterns
+```
+
+The `install` command clones the repo into `~/.hermes/plugins/custom-dangerous-patterns/`
+and prompts to enable it. Use `--enable` to skip the prompt:
+
+```bash
+hermes plugins install scross01/hermes-custom-dangerous-patterns-plugin --enable
+```
+
+### Updating
+
+```bash
+hermes plugins update custom-dangerous-patterns
+```
+
+Then restart Hermes for the changes to take effect.
+
+### Alternative: Manual clone or symlink
 
 ```bash
 git clone https://github.com/scross01/hermes-custom-dangerous-patterns-plugin.git \
@@ -39,15 +61,16 @@ ln -s /path/to/hermes-custom-dangerous-patterns-plugin \
       ~/.hermes/plugins/custom-dangerous-patterns
 ```
 
-**Important:** The directory inside `~/.hermes/plugins/` must be named `custom-dangerous-patterns` (with the trailing `s`).
+**Important:** The directory inside `~/.hermes/plugins/` must be named `custom-dangerous-patterns`
+(with the trailing `s`).
 
-### Step 2: Enable the plugin
+Then enable:
 
 ```bash
 hermes plugins enable custom-dangerous-patterns
 ```
 
-### Step 3: Create the config file
+### Step 2: Create the config file
 
 ```bash
 cp ~/.hermes/plugins/custom-dangerous-patterns/examples/custom-dangerous-patterns.yaml \
@@ -56,7 +79,7 @@ cp ~/.hermes/plugins/custom-dangerous-patterns/examples/custom-dangerous-pattern
 
 Or create `~/.hermes/custom-dangerous-patterns.yaml` manually (see [Configuration](#configuration)).
 
-### Step 4: Restart Hermes
+### Step 3: Restart Hermes
 
 The plugin loads at startup. Restart the gateway or start a new CLI session:
 
@@ -65,7 +88,7 @@ hermes gateway restart    # if using the gateway
 # or just start a new `hermes` CLI session
 ```
 
-### Step 5: Test it
+### Step 4: Test it
 
 ```
 > vultr instance create --region ewr --plan vc2-1c-1gb
@@ -390,7 +413,16 @@ hermes-custom-dangerous-patterns-plugin/
 
 - Python 3.11+
 - [Hermes Agent](https://github.com/NousResearch/hermes-agent) (tested with 0.15.1)
-- PyYAML (`pip install pyyaml`) — for config loading
+- PyYAML — for config loading (ships with Hermes Agent; also available via `uv pip install pyyaml`)
+
+### Development
+
+```bash
+git clone https://github.com/scross01/hermes-custom-dangerous-patterns-plugin.git
+cd hermes-custom-dangerous-patterns-plugin
+uv venv --python 3.11 .venv
+uv sync --extra dev
+```
 
 ## License
 

@@ -9,6 +9,12 @@ description = "Hermes Agent plugin for custom dangerous command patterns"
 requires-python = ">=3.11"
 dependencies = ["PyYAML"]
 
+# Not a distributable package — installed by Hermes via flat file copy to
+# ~/.hermes/plugins/custom-dangerous-patterns/.  Explicitly declaring no
+# packages prevents setuptools flat-layout discovery errors on uv sync.
+[tool.setuptools]
+packages = []
+
 [project.optional-dependencies]
 dev = [
     "pytest>=8",
