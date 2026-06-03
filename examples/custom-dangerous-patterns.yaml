@@ -7,51 +7,54 @@
 # Each pattern triggers the approval prompt (once/session/always/deny).
 # Allow patterns exempt commands from approval, even if they match a
 # block pattern. Allow wins over block.
+#
+# TIP: Use single-quoted YAML strings for patterns — backslashes pass
+# through literally:  '\bvultr\b'  not  "\\bvultr\\b"
 
 # ── Blocked commands ────────────────────────────────────────────────
 # These trigger the approval prompt when matched.
 
 patterns:
   # ── Cloud CLI tools ──────────────────────────────────────────────
-  - pattern: "\\bvultr\\b"
-    description: "Vultr CLI command"
+  - pattern: '\bvultr\b'
+    description: 'Vultr CLI command'
     examples:
-      - "vultr account info"
-      - "vultr instance list"
-      - "sudo vultr dns list"
+      - 'vultr account info'
+      - 'vultr instance list'
+      - 'sudo vultr dns list'
 
-  - pattern: "\\bgcloud\\b"
-    description: "Google Cloud CLI command"
+  - pattern: '\bgcloud\b'
+    description: 'Google Cloud CLI command'
     examples:
-      - "gcloud compute instances delete my-vm"
+      - 'gcloud compute instances delete my-vm'
 
-  - pattern: "\\baws\\s+(ec2|s3|rds|iam|lambda|cloudformation)\\b"
-    description: "AWS CLI mutating service command"
+  - pattern: '\baws\s+(ec2|s3|rds|iam|lambda|cloudformation)\b'
+    description: 'AWS CLI mutating service command'
     examples:
-      - "aws ec2 terminate-instances --instance-ids i-12345"
-      - "aws s3 rb s://my-bucket --force"
+      - 'aws ec2 terminate-instances --instance-ids i-12345'
+      - 'aws s3 rb s://my-bucket --force'
 
   # ── Deployment tools ─────────────────────────────────────────────
-  - pattern: "\\bcapistrano\\b.*\\bdeploy\\b"
-    description: "Capistrano deployment"
+  - pattern: '\bcapistrano\b.*\bdeploy\b'
+    description: 'Capistrano deployment'
     examples:
-      - "cap production deploy"
+      - 'cap production deploy'
 
-  - pattern: "\\bfab\\b.*\\bdeploy\\b"
-    description: "Fabric deployment"
+  - pattern: '\bfab\b.*\bdeploy\b'
+    description: 'Fabric deployment'
     examples:
-      - "fab deploy production"
+      - 'fab deploy production'
 
   # ── Database operations ──────────────────────────────────────────
-  - pattern: "\\bpg_dump\\b.*--clean\\b"
-    description: "PostgreSQL dump with --clean (drops objects)"
+  - pattern: '\bpg_dump\b.*--clean\b'
+    description: 'PostgreSQL dump with --clean (drops objects)'
     examples:
-      - "pg_dump --clean mydb > dump.sql"
+      - 'pg_dump --clean mydb > dump.sql'
 
-  - pattern: "\\bmongodump\\b.*--drop\\b"
-    description: "MongoDB dump with --drop"
+  - pattern: '\bmongodump\b.*--drop\b'
+    description: 'MongoDB dump with --drop'
     examples:
-      - "mongodump --drop --db mydb"
+      - 'mongodump --drop --db mydb'
 
 # ── Allowed patterns ────────────────────────────────────────────────
 # Commands matching these are EXEMPT from approval, even if they also
@@ -60,17 +63,17 @@ patterns:
 
 allow_patterns:
   # Read-only Vultr commands
-  - pattern: "\\bvultr\\s+(account\\s+info|instance\\s+list|dns\\s+list|plan\\s+list)\\b"
-    description: "Read-only Vultr commands"
+  - pattern: '\bvultr\s+(account\s+info|instance\s+list|dns\s+list|plan\s+list)\b'
+    description: 'Read-only Vultr commands'
 
   # Dry-run modes
-  - pattern: "\\bmy-company-deploy\\s+--dry-run\\b"
-    description: "Dry-run mode is safe"
+  - pattern: '\bmy-company-deploy\s+--dry-run\b'
+    description: 'Dry-run mode is safe'
 
   # Help and version flags
-  - pattern: "\\b(vultr|gcloud|aws)\\s+(-h|--help|help)\\b"
-    description: "Help flags are safe"
+  - pattern: '\b(vultr|gcloud|aws)\s+(-h|--help|help)\b'
+    description: 'Help flags are safe'
 
   # Shell completion
-  - pattern: "\\b(vultr|gcloud|aws)\\s+completion\\b"
-    description: "Shell completion scripts are safe"
+  - pattern: '\b(vultr|gcloud|aws)\s+completion\b'
+    description: 'Shell completion scripts are safe'

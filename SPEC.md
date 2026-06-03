@@ -71,25 +71,28 @@ Override with env var: `HERMES_CUSTOM_PATTERNS_PATH=/path/to/file.yaml`
 # Patterns are Python regexes matched case-insensitively against the
 # full command string (after ANSI stripping and Unicode normalization).
 #
+# TIP: Use single-quoted YAML strings for patterns — backslashes pass
+# through literally:  '\bvultr\b'  not  "\\bvultr\\b"
+#
 # See: https://docs.python.org/3/library/re.html#regular-expression-syntax
 
 patterns:
-  - pattern: "\\bvultr\\b"
-    description: "Vultr CLI command"
+  - pattern: '\bvultr\b'
+    description: 'Vultr CLI command'
     examples:
-      - "vultr account info"
-      - "vultr instance list"
+      - 'vultr account info'
+      - 'vultr instance list'
 
-  - pattern: "\\baws\\s+(ec2|s3|rds|iam|lambda|cloudformation)\\b"
-    description: "AWS CLI mutating service command"
+  - pattern: '\baws\s+(ec2|s3|rds|iam|lambda|cloudformation)\b'
+    description: 'AWS CLI mutating service command'
     examples:
-      - "aws ec2 terminate-instances --instance-ids i-12345"
+      - 'aws ec2 terminate-instances --instance-ids i-12345'
 
 # Allow patterns — exempt commands from approval, even if they match
 # a block pattern. Evaluated BEFORE block patterns. Allow wins over block.
 allow_patterns:
-  - pattern: "\\bvultr\\s+(account\\s+info|instance\\s+list)\\b"
-    description: "Read-only Vultr commands"
+  - pattern: '\bvultr\s+(account\s+info|instance\s+list)\b'
+    description: 'Read-only Vultr commands'
 ```
 
 ### Pattern Rules

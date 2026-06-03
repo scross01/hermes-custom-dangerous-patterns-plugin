@@ -90,11 +90,11 @@ These commands trigger the approval prompt:
 
 ```yaml
 patterns:
-  - pattern: "\\bvultr\\b"
-    description: "Vultr CLI command"
+  - pattern: '\bvultr\b'
+    description: 'Vultr CLI command'
     examples:
-      - "vultr account info"
-      - "vultr instance list"
+      - 'vultr account info'
+      - 'vultr instance list'
 ```
 
 | Field | Required | Description |
@@ -109,8 +109,8 @@ Exempt specific commands from approval, even if they match a block pattern:
 
 ```yaml
 allow_patterns:
-  - pattern: "\\bvultr\\s+(account\\s+info|instance\\s+list)\\b"
-    description: "Read-only Vultr commands"
+  - pattern: '\bvultr\s+(account\s+info|instance\s+list)\b'
+    description: 'Read-only Vultr commands'
 ```
 
 | Field | Required | Description |
@@ -136,39 +136,42 @@ allow_patterns:
 
 ```yaml
 # ~/.hermes/custom-dangerous-patterns.yaml
+#
+# TIP: Use single-quoted strings for patterns — backslashes pass through
+# literally:  '\bvultr\b'  not  "\\bvultr\\b"
 
 patterns:
   # ── Cloud CLI tools ──────────────────────────────────────────────
-  - pattern: "\\bvultr\\b"
-    description: "Vultr CLI command"
+  - pattern: '\bvultr\b'
+    description: 'Vultr CLI command'
     examples:
-      - "vultr account info"
-      - "vultr instance list"
-      - "sudo vultr dns list"
+      - 'vultr account info'
+      - 'vultr instance list'
+      - 'sudo vultr dns list'
 
-  - pattern: "\\bgcloud\\b"
-    description: "Google Cloud CLI command"
+  - pattern: '\bgcloud\b'
+    description: 'Google Cloud CLI command'
     examples:
-      - "gcloud compute instances delete my-vm"
+      - 'gcloud compute instances delete my-vm'
 
-  - pattern: "\\baws\\s+(ec2|s3|rds|iam|lambda|cloudformation)\\b"
-    description: "AWS CLI mutating service command"
+  - pattern: '\baws\s+(ec2|s3|rds|iam|lambda|cloudformation)\b'
+    description: 'AWS CLI mutating service command'
     examples:
-      - "aws ec2 terminate-instances --instance-ids i-12345"
+      - 'aws ec2 terminate-instances --instance-ids i-12345'
 
   # ── Deployment tools ─────────────────────────────────────────────
-  - pattern: "\\bcapistrano\\b.*\\bdeploy\\b"
-    description: "Capistrano deployment"
+  - pattern: '\bcapistrano\b.*\bdeploy\b'
+    description: 'Capistrano deployment'
 
-  - pattern: "\\bfab\\b.*\\bdeploy\\b"
-    description: "Fabric deployment"
+  - pattern: '\bfab\b.*\bdeploy\b'
+    description: 'Fabric deployment'
 
   # ── Database operations ──────────────────────────────────────────
-  - pattern: "\\bpg_dump\\b.*--clean\\b"
-    description: "PostgreSQL dump with --clean (drops objects)"
+  - pattern: '\bpg_dump\b.*--clean\b'
+    description: 'PostgreSQL dump with --clean (drops objects)'
 
-  - pattern: "\\bmongodump\\b.*--drop\\b"
-    description: "MongoDB dump with --drop"
+  - pattern: '\bmongodump\b.*--drop\b'
+    description: 'MongoDB dump with --drop'
 
 # ── Allow patterns ────────────────────────────────────────────────
 # Commands matching these are EXEMPT from approval, even if they
@@ -177,20 +180,20 @@ patterns:
 
 allow_patterns:
   # Read-only Vultr commands
-  - pattern: "\\bvultr\\s+(account\\s+info|instance\\s+list|dns\\s+list|plan\\s+list)\\b"
-    description: "Read-only Vultr commands"
+  - pattern: '\bvultr\s+(account\s+info|instance\s+list|dns\s+list|plan\s+list)\b'
+    description: 'Read-only Vultr commands'
 
   # Dry-run modes
-  - pattern: "\\bmy-company-deploy\\s+--dry-run\\b"
-    description: "Dry-run mode is safe"
+  - pattern: '\bmy-company-deploy\s+--dry-run\b'
+    description: 'Dry-run mode is safe'
 
   # Help and version flags
-  - pattern: "\\b(vultr|gcloud|aws)\\s+(-h|--help|help)\\b"
-    description: "Help flags are safe"
+  - pattern: '\b(vultr|gcloud|aws)\s+(-h|--help|help)\b'
+    description: 'Help flags are safe'
 
   # Shell completion
-  - pattern: "\\b(vultr|gcloud|aws)\\s+completion\\b"
-    description: "Shell completion scripts are safe"
+  - pattern: '\b(vultr|gcloud|aws)\s+completion\b'
+    description: 'Shell completion scripts are safe'
 ```
 
 ## How It Works
