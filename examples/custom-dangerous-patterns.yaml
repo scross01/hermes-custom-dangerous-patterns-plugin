@@ -1,0 +1,76 @@
+# Custom dangerous command patterns for Hermes Agent.
+# Place this file at ~/.hermes/custom-dangerous-patterns.yaml
+#
+# Patterns are Python regexes matched case-insensitively against the
+# full command string (after ANSI stripping and Unicode normalization).
+#
+# Each pattern triggers the approval prompt (once/session/always/deny).
+# Allow patterns exempt commands from approval, even if they match a
+# block pattern. Allow wins over block.
+
+# ── Blocked commands ────────────────────────────────────────────────
+# These trigger the approval prompt when matched.
+
+patterns:
+  # ── Cloud CLI tools ──────────────────────────────────────────────
+  - pattern: "\\bvultr\\b"
+    description: "Vultr CLI command"
+    examples:
+      - "vultr account info"
+      - "vultr instance list"
+      - "sudo vultr dns list"
+
+  - pattern: "\\bgcloud\\b"
+    description: "Google Cloud CLI command"
+    examples:
+      - "gcloud compute instances delete my-vm"
+
+  - pattern: "\\baws\\s+(ec2|s3|rds|iam|lambda|cloudformation)\\b"
+    description: "AWS CLI mutating service command"
+    examples:
+      - "aws ec2 terminate-instances --instance-ids i-12345"
+      - "aws s3 rb s://my-bucket --force"
+
+  # ── Deployment tools ─────────────────────────────────────────────
+  - pattern: "\\bcapistrano\\b.*\\bdeploy\\b"
+    description: "Capistrano deployment"
+    examples:
+      - "cap production deploy"
+
+  - pattern: "\\bfab\\b.*\\bdeploy\\b"
+    description: "Fabric deployment"
+    examples:
+      - "fab deploy production"
+
+  # ── Database operations ──────────────────────────────────────────
+  - pattern: "\\bpg_dump\\b.*\\b--clean\\b"
+    description: "PostgreSQL dump with --clean (drops objects)"
+    examples:
+      - "pg_dump --clean mydb > dump.sql"
+
+  - pattern: "\\bmongodump\\b.*\\b--drop\\b"
+    description: "MongoDB dump with --drop"
+    examples:
+      - "mongodump --drop --db mydb"
+
+# ── Allowed patterns ────────────────────────────────────────────────
+# Commands matching these are EXEMPT from approval, even if they also
+# match a blocked pattern. Evaluated BEFORE block patterns.
+# Allow wins over block.
+
+allow_patterns:
+  # Read-only Vultr commands
+  - pattern: "\\bvultr\\s+(account\\s+info|instance\\s+list|dns\\s+list|plan\\s+list)\\b"
+    description: "Read-only Vultr commands"
+
+  # Dry-run modes
+  - pattern: "\\bmy-company-deploy\\s+--dry-run\\b"
+    description: "Dry-run mode is safe"
+
+  # Help and version flags
+  - pattern: "\\b(vultr|gcloud|aws)\\s+(-h|--help|help)\\b"
+    description: "Help flags are safe"
+
+  # Shell completion
+  - pattern: "\\b(vultr|gcloud|aws)\\s+completion\\b"
+    description: "Shell completion scripts are safe"
