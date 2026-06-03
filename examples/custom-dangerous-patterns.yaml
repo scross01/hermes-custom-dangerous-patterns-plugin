@@ -15,46 +15,58 @@
 # These trigger the approval prompt when matched.
 
 patterns:
-  # ── Cloud CLI tools ──────────────────────────────────────────────
-  - pattern: '\bvultr\b'
-    description: 'Vultr CLI command'
+  # ── Cloud CLI tools (destructive) ────────────────────────────────
+  - pattern: '\bvultr\s+(instance\s+create|instance\s+delete|snapshot\s+create|snapshot\s+delete)\b'
+    description: 'Vultr mutating instance/snapshot command'
     examples:
-      - 'vultr account info'
-      - 'vultr instance list'
-      - 'sudo vultr dns list'
+      - 'vultr instance create --region ewr --plan vc2-1c-1gb'
+      - 'vultr instance delete --instance-id cb670a12-e4f5-6d78-ab90-1234567890ab'
 
-  - pattern: '\bgcloud\b'
-    description: 'Google Cloud CLI command'
+  - pattern: '\bterraform\s+(destroy|apply)\b'
+    description: 'Terraform destroy/apply (mutates infrastructure)'
     examples:
-      - 'gcloud compute instances delete my-vm'
+      - 'terraform destroy -auto-approve'
+      - 'terraform apply -auto-approve'
 
   - pattern: '\baws\s+(ec2|s3|rds|iam|lambda|cloudformation)\b'
     description: 'AWS CLI mutating service command'
     examples:
       - 'aws ec2 terminate-instances --instance-ids i-12345'
       - 'aws s3 rb s://my-bucket --force'
+      - 'aws rds delete-db-instance --db-instance-identifier mydb'
+
+  - pattern: '\bgcloud\s+(compute\s+instances\s+delete|projects\s+delete)\b'
+    description: 'GCP destructive command'
+    examples:
+      - 'gcloud compute instances delete my-vm --zone=us-central1-a'
+
+  - pattern: '\bkubectl\s+delete\s+namespace\b'
+    description: 'Kubernetes namespace deletion'
+    examples:
+      - 'kubectl delete namespace staging'
 
   # ── Deployment tools ─────────────────────────────────────────────
-  - pattern: '\bcapistrano\b.*\bdeploy\b'
-    description: 'Capistrano deployment'
+  - pattern: '\bcap\s+\w+\s+deploy\b'
+    description: 'Capistrano production deploy'
     examples:
       - 'cap production deploy'
 
-  - pattern: '\bfab\b.*\bdeploy\b'
-    description: 'Fabric deployment'
+  - pattern: '\bfab\s+\w*\s*deploy\b'
+    description: 'Fabric deploy'
     examples:
       - 'fab deploy production'
 
   # ── Database operations ──────────────────────────────────────────
-  - pattern: '\bpg_dump\b.*--clean\b'
-    description: 'PostgreSQL dump with --clean (drops objects)'
+  - pattern: '\bDROP\s+(TABLE|DATABASE)\b'
+    description: 'SQL DROP statement'
     examples:
-      - 'pg_dump --clean mydb > dump.sql'
+      - 'DROP TABLE users'
+      - 'DROP DATABASE production'
 
   - pattern: '\bmongodump\b.*--drop\b'
-    description: 'MongoDB dump with --drop'
+    description: 'MongoDB dump with --drop (overwrites existing data)'
     examples:
-      - 'mongodump --drop --db mydb'
+      - 'mongodump --drop --db production'
 
 # ── Allowed patterns ────────────────────────────────────────────────
 # Commands matching these are EXEMPT from approval, even if they also
@@ -62,18 +74,19 @@ patterns:
 # Allow wins over block.
 
 allow_patterns:
-  # Read-only Vultr commands
+  # ── Read-only cloud commands (safe) ─────────────────────────────
   - pattern: '\bvultr\s+(account\s+info|instance\s+list|dns\s+list|plan\s+list)\b'
     description: 'Read-only Vultr commands'
 
-  # Dry-run modes
-  - pattern: '\bmy-company-deploy\s+--dry-run\b'
-    description: 'Dry-run mode is safe'
+  - pattern: '\baws\s+(ec2\s+describe|s3\s+ls|s3\s+cp.*--dry-run|iam\s+list)\b'
+    description: 'AWS read-only commands'
 
-  # Help and version flags
-  - pattern: '\b(vultr|gcloud|aws)\s+(-h|--help|help)\b'
+  - pattern: '\bterraform\s+(plan|state\s+list|output)\b'
+    description: 'Terraform read-only commands'
+
+  # ── Help and utility (safe) ─────────────────────────────────────
+  - pattern: '\b(vultr|gcloud|aws|terraform|kubectl)\s+(-h|--help|help)\b'
     description: 'Help flags are safe'
 
-  # Shell completion
-  - pattern: '\b(vultr|gcloud|aws)\s+completion\b'
+  - pattern: '\b(vultr|gcloud|aws|terraform)\s+completion\b'
     description: 'Shell completion scripts are safe'
