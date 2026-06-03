@@ -103,12 +103,12 @@ patterns:
       - "fab deploy production"
 
   # ── Database operations ──────────────────────────────────────────
-  - pattern: "\\bpg_dump\\b.*\\b--clean\\b"
+  - pattern: "\\bpg_dump\\b.*--clean\\b"
     description: "PostgreSQL dump with --clean (drops objects)"
     examples:
       - "pg_dump --clean mydb > dump.sql"
 
-  - pattern: "\\bmongodump\\b.*\\b--drop\\b"
+  - pattern: "\\bmongodump\\b.*--drop\\b"
     description: "MongoDB dump with --drop"
     examples:
       - "mongodump --drop --db mydb"
