@@ -5,8 +5,6 @@ import sys
 import types
 from unittest.mock import MagicMock
 
-import pytest
-
 
 def _install_tools_approval(monkeypatch):
     """Install mock tools and tools.approval modules into sys.modules."""
