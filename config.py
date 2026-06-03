@@ -326,13 +326,14 @@ def _check_protected_patterns(
     if not stored_protected:
         return  # No previously recorded protected patterns
 
-    # Collect current protected patterns by description
+    # Collect current protected patterns with index-prefixed keys
     current = {}
     for section in ("patterns", "allow_patterns", "deny_patterns"):
-        for entry in validated_config.get(section, []):
+        entries = validated_config.get(section, [])
+        for index, entry in enumerate(entries):
             if entry.get("protected") and entry.get("enabled", True):
-                desc = entry["description"]
-                current[desc] = hashlib.sha256(
+                key = f"{index}:{entry['description']}"
+                current[key] = hashlib.sha256(
                     entry["pattern"].encode("utf-8")
                 ).hexdigest()
 
@@ -402,9 +403,10 @@ def _check_config_integrity(
     # Collect protected pattern hashes to store
     protected_hashes = {}
     for section in ("patterns", "allow_patterns", "deny_patterns"):
-        for entry in validated_config.get(section, []):
+        entries = validated_config.get(section, [])
+        for index, entry in enumerate(entries):
             if entry.get("protected") and entry.get("enabled", True):
-                protected_hashes[entry["description"]] = hashlib.sha256(
+                protected_hashes[f"{index}:{entry['description']}"] = hashlib.sha256(
                     entry["pattern"].encode("utf-8")
                 ).hexdigest()
 
