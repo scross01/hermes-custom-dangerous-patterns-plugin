@@ -1,4 +1,4 @@
-# hermes-custom-dangerous-patterns
+# Custom Dangerous Patterns plugin for Hermes Agent
 
 > **⚠️ EXPERIMENTAL — USE AT YOUR OWN RISK**
 >
