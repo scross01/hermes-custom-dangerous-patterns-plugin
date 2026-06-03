@@ -135,7 +135,7 @@ def test_is_allow_pattern_no_match(reset_patterns_globals):
         ]
     }
     compile_all(config)
-    result = is_allow_pattern("vultr instance create")
+    result = is_allow_pattern("vultr instance delete")
     assert result is None
 
 

@@ -91,10 +91,10 @@ hermes gateway restart    # if using the gateway
 ### Step 4: Test it
 
 ```
-> vultr instance create --region ewr --plan vc2-1c-1gb
+> vultr instance delete --instance-id cb670a12-e4f5-6d78-ab90-1234567890ab
 
-⚠️ Dangerous command detected: Vultr mutating instance/snapshot command
-    vultr instance create --region ewr --plan vc2-1c-1gb
+⚠️ Dangerous command detected: Vultr destructive instance/snapshot command
+    vultr instance delete --instance-id cb670a12-e4f5-6d78-ab90-1234567890ab
 
   [o]nce    — allow this one time
   [s]ession — allow for this session
@@ -189,13 +189,13 @@ Without `\b`, `\bvultr` would match any string containing "vultr" — including 
 patterns:
   # ── Cloud CLI tools (destructive) ────────────────────────────────
   - pattern: '\bvultr\s+(instance\s+create|instance\s+delete|snapshot\s+create|snapshot\s+delete)\b'
-    description: 'Vultr mutating instance/snapshot command'
+    description: 'Vultr destructive instance/snapshot command'
     examples:
-      - 'vultr instance create --region ewr --plan vc2-1c-1gb'
       - 'vultr instance delete --instance-id cb670a12-e4f5-6d78-ab90-1234567890ab'
+      - 'vultr snapshot delete --snapshot-id 5a3b2c1d'
 
   - pattern: '\bterraform\s+(destroy|apply)\b'
-    description: 'Terraform destroy/apply (mutates infrastructure)'
+    description: 'Terraform destroy/apply (infrastructure mutation)'
     examples:
       - 'terraform destroy -auto-approve'
       - 'terraform apply -auto-approve'

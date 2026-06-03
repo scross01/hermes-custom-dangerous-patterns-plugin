@@ -131,8 +131,8 @@ The plugin's injected patterns participate in Hermes's existing approval system.
 
 **Pattern key mechanics:**
 ```python
-# When user approves "vultr instance create":
-# pattern_key = "Vultr mutating instance/snapshot command"  (the description)
+# When user approves "vultr instance delete":
+# pattern_key = "Vultr destructive instance/snapshot command"  (the description)
 # This key is stored in _session_approved[session_key] and/or _permanent_approved
 # Future calls to detect_dangerous_command for the same pattern return the same key
 ```
@@ -291,7 +291,7 @@ patterns:
     description: 'Vultr instance creation'
     guidance: 'Use the Vultr web UI (https://my.vultr.com) or Terraform for auditable provisioning.'
     examples:
-      - 'vultr instance create --region ewr --plan vc2-1c-1gb'
+      - 'vultr instance delete --instance-id cb670a12-e4f5-6d78-ab90-1234567890ab'
 
   - pattern: '\becho\s+["\']this\s+is\s+dangerous["\']'
     description: '[TEST] Echo with danger text'
@@ -482,7 +482,7 @@ This is critical for CI/CD testing the plugin itself and for users who want a sa
 | Item | Priority | Description |
 |------|----------|-------------|
 | `hermes custom-patterns` CLI | High | `add`, `remove`, `list`, `test`, `enable`, `disable`, `enable --group testing` subcommands, registered via `ctx.register_cli_command()` |
-| Pattern test runner | High | `hermes custom-patterns test "vultr instance create"` → shows which patterns match, outcome (block/allow/pass/deny), and whether the prompt would appear |
+| Pattern test runner | High | `hermes custom-patterns test "vultr instance delete"` → shows which patterns match, outcome (block/allow/pass/deny), and whether the prompt would appear |
 | Config syntax validation | Medium | `hermes custom-patterns validate` — check YAML + regex validity without running |
 | Built-in pattern reference | Medium | `hermes custom-patterns builtins` — list Hermes's ~47 hardcoded patterns so users know what's already covered |
 | Pattern description search | Low | `hermes custom-patterns search "terraform"` — find all patterns matching a keyword |

@@ -17,13 +17,13 @@
 patterns:
   # ── Cloud CLI tools (destructive) ────────────────────────────────
   - pattern: '\bvultr\s+(instance\s+create|instance\s+delete|snapshot\s+create|snapshot\s+delete)\b'
-    description: 'Vultr mutating instance/snapshot command'
+    description: 'Vultr destructive instance/snapshot command'
     examples:
-      - 'vultr instance create --region ewr --plan vc2-1c-1gb'
       - 'vultr instance delete --instance-id cb670a12-e4f5-6d78-ab90-1234567890ab'
+      - 'vultr snapshot delete --snapshot-id 5a3b2c1d'
 
   - pattern: '\bterraform\s+(destroy|apply)\b'
-    description: 'Terraform destroy/apply (mutates infrastructure)'
+    description: 'Terraform destroy/apply (infrastructure mutation)'
     examples:
       - 'terraform destroy -auto-approve'
       - 'terraform apply -auto-approve'

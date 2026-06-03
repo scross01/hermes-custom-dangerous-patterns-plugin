@@ -252,7 +252,7 @@ See [README.md](README.md#installation) for step-by-step instructions.
 
 1. Install plugin, create config with `vultr` pattern
 2. Run `hermes chat` → ask to run `vultr account info` → should run without prompt (allow pattern)
-3. Run `hermes chat` → ask to run `vultr instance create` → should prompt for approval
+3. Run `hermes chat` → ask to run `vultr instance delete` → should prompt for approval
 4. Approve with "session" → run again → should be auto-approved
 5. Test gateway: send command via Telegram → should get `/approve` prompt
 
