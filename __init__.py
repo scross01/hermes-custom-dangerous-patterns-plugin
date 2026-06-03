@@ -88,6 +88,13 @@ def register(ctx: Any) -> None:
             deny_count,
         )
 
+        # 5. Register pre_tool_call hook to catch deny patterns BEFORE
+        #    the terminal tool executes. This ensures the agent's blocked-
+        #    tool handling kicks in (skip tool, return block message to LLM).
+        #    Without this, deny patterns are checked inside the terminal
+        #    tool and the agent treats the result as a regular error.
+        ctx.register_hook("pre_tool_call", _make_deny_hook(is_deny_pattern, is_allow_pattern))
+
     if not block_count and not allow_count and not deny_count:
         logger.info("custom-dangerous-patterns: no active patterns, plugin idle")
         return
@@ -205,6 +212,48 @@ def _patch_deny_handler(deny_checker, allow_checker=None) -> None:
             )
     except ImportError:
         pass
+
+
+def _make_deny_hook(deny_checker, allow_checker=None):
+    """Create a pre_tool_call hook that blocks deny-pattern commands.
+
+    This hook fires BEFORE the terminal tool executes, so the agent's
+    blocked-tool handling kicks in (skip execution, return block message
+    to LLM). Without this, deny patterns are checked inside the terminal
+    tool and the agent treats the result as a regular error.
+    """
+
+    def _hook(tool_name: str, args: dict, **kwargs) -> dict | None:
+        if tool_name != "terminal":
+            return None
+
+        command = args.get("command", "")
+        if not command:
+            return None
+
+        # Check allow patterns first — allow wins over deny
+        if allow_checker is not None:
+            allow_match = allow_checker(command)
+            if allow_match is not None:
+                return None
+
+        # Check deny patterns
+        deny_match = deny_checker(command)
+        if deny_match is not None:
+            return {
+                "action": "block",
+                "message": (
+                    f"BLOCKED by deny pattern: {deny_match}\n\n"
+                    f"[custom-dangerous-patterns] This command matches a "
+                    f"deny-pattern rule and was blocked without a prompt. "
+                    f"To permit this command, disable or remove the deny "
+                    f"pattern in ~/.hermes/custom-dangerous-patterns.yaml."
+                ),
+            }
+
+        return None
+
+    return _hook
 
 
 def _patch_detect_function_for_deny(deny_checker, allow_checker=None) -> None:
