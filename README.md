@@ -59,10 +59,10 @@ hermes gateway restart    # if using the gateway
 ### Step 5: Test it
 
 ```
-> vultr instance list
+> vultr instance create --region ewr --plan vc2-1c-1gb
 
-⚠️ Dangerous command detected: Vultr CLI command
-    vultr instance list
+⚠️ Dangerous command detected: Vultr mutating instance/snapshot command
+    vultr instance create --region ewr --plan vc2-1c-1gb
 
   [o]nce    — allow this one time
   [s]ession — allow for this session
@@ -117,6 +117,20 @@ allow_patterns:
 |-------|----------|-------------|
 | `pattern` | Yes | Python regex (same flags as block patterns) |
 | `description` | No | Documentation-only label |
+
+### A Note on `\b` (Word Boundaries)
+
+Patterns use `\b` to match whole words only. This prevents false positives where a command name appears as a substring:
+
+| Pattern | Matches | Doesn't match |
+|---------|---------|---------------|
+| `\bvultr\b` | `vultr instance list` | `echo vultr_test`, `my-vultr-server` |
+| `\baws\s+ec2\b` | `aws ec2 describe-instances` | `aws-ec2-tool`, `paws ec2` |
+| `\bterraform destroy\b` | `terraform destroy -auto-approve` | `echo "terraform destroy"` in a script |
+
+Without `\b`, `\bvultr` would match any string containing "vultr" — including hostnames, variable names, or unrelated commands. The `\b` anchor ensures the pattern only triggers on the actual CLI tool name.
+
+**Tip:** Use single-quoted YAML strings for patterns — backslashes pass through literally (`'\bvultr\b'`), avoiding the double-escaping needed with double quotes (`"\\bvultr\\b"`).
 
 ### Evaluation Order
 
