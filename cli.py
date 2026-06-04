@@ -184,7 +184,7 @@ def cmd_test(
       4. Built-in patterns (alongside block patterns)
     """
     from .config import load_config
-    from .patterns import compile_all, is_deny_pattern, is_allow_pattern, get_block_patterns
+    from .patterns import compile_all, get_block_patterns, is_allow_pattern, is_deny_pattern
 
     if not command or not command.strip():
         return ("Error: command must not be empty.\n", 1)
@@ -310,9 +310,128 @@ def cmd_init(
     with_examples: bool = False,
     force: bool = False,
 ) -> tuple[str, int]:
-    """Create a starter config file."""
-    # Stub — implemented in Chunk 4
-    return ("init: not yet implemented\n", 1)
+    """Create a starter config file and guide the user.
+
+    All example patterns are DISABLED by default — the user must
+    review and enable the ones they want. Use --with-examples for
+    a fully-enabled demonstration config.
+    """
+    from .config import resolve_config_path, save_config
+
+    config_path = resolve_config_path()
+
+    # Check if config already exists
+    if config_path.exists():
+        if not force:
+            return (
+                f"Config already exists at {config_path}.\n"
+                f"Use --force to overwrite.\n",
+                1,
+            )
+
+    # Load the example config template
+    if with_examples:
+        config_dict = _load_example_config(enabled=True)
+    else:
+        config_dict = _build_minimal_starter_config()
+
+    # Count patterns for the output message
+    block_count = len(config_dict.get("patterns", []))
+    allow_count = len(config_dict.get("allow_patterns", []))
+    deny_count = len(config_dict.get("deny_patterns", []))
+
+    save_config(config_dict, config_path)
+
+    lines = [
+        f"Created: {config_path} ({block_count} block, {allow_count} allow, "
+        f"{deny_count} deny patterns — all disabled)",
+        "",
+        "Next steps:",
+        "  1. Review the config: hermes custom-patterns list --disabled",
+        "  2. Enable patterns you want: hermes custom-patterns enable --group cloud",
+        '  3. Test your patterns: hermes custom-patterns test "vultr instance delete"',
+        "  4. Restart Hermes for changes to take effect",
+    ]
+    return ("\n".join(lines) + "\n", 0)
+
+
+def _build_minimal_starter_config() -> dict[str, Any]:
+    """Build a minimal starter config with [TEST] patterns only."""
+    return {
+        "patterns": [
+            {
+                "pattern": r"\becho\s+.*danger\b",
+                "description": "[TEST] Echo with danger text",
+                "enabled": False,
+                "group": "testing",
+            },
+            {
+                "pattern": r"\bping\s+-c\s+\d+\s+\d+\.\d+\.\d+\.\d+\b",
+                "description": "[TEST] Excessive ping to IP",
+                "enabled": False,
+                "group": "testing",
+            },
+            {
+                "pattern": r"\bsleep\s+\d{3,}\b",
+                "description": "[TEST] Long sleep command",
+                "enabled": False,
+                "group": "testing",
+            },
+            {
+                "pattern": r"\brm\s+(-[a-zA-Z]*r[a-zA-Z]*f[a-zA-Z]*)\s+/tmp/",
+                "description": "[TEST] Scoped rm in /tmp",
+                "enabled": False,
+                "group": "testing",
+            },
+        ],
+        "allow_patterns": [],
+        "deny_patterns": [
+            {
+                "pattern": r"\bgit\s+push\s+--force\b",
+                "description": "[TEST] Force git push",
+                "enabled": False,
+                "group": "testing",
+            },
+        ],
+    }
+
+
+def _load_example_config(enabled: bool = True) -> dict[str, Any]:
+    """Load the example config from the plugin's examples directory.
+
+    Tries to load from the installed plugin path first, then falls back
+    to the built-in minimal config.
+    """
+    from pathlib import Path
+
+    # Try the shipped examples file
+    example_paths = [
+        Path(__file__).resolve().parent / "examples" / "custom-dangerous-patterns.yaml",
+        Path.home() / ".hermes" / "plugins" / "custom-dangerous-patterns"
+        / "examples" / "custom-dangerous-patterns.yaml",
+    ]
+
+    for example_path in example_paths:
+        if example_path.is_file():
+            try:
+                from .config import _load_single_yaml
+
+                raw = _load_single_yaml(example_path)
+                if raw:
+                    from .config import _validate_config
+
+                    config = _validate_config(raw)
+                    # Set enabled/disabled based on flag
+                    if not enabled:
+                        for section in ("patterns", "allow_patterns", "deny_patterns"):
+                            for entry in config.get(section, []):
+                                entry["enabled"] = False
+                    return config
+            except Exception:
+                pass
+
+    # Fallback: minimal starter config
+    return _build_minimal_starter_config()
 
 
 def cmd_enable(
