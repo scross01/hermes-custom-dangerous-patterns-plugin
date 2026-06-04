@@ -131,6 +131,12 @@ def _load_yaml(path: Path) -> dict[str, Any] | None:
                 merged.setdefault("patterns", [])
                 merged.setdefault("allow_patterns", [])
                 merged.setdefault("deny_patterns", [])
+        # Deduplicate pattern entries by key (later files win) so that
+        # removals written to 99-custom.yaml (enabled: False) correctly
+        # override matching entries from user-created files — without
+        # this, the same pattern appears once enabled and once disabled.
+        for section in ("patterns", "allow_patterns", "deny_patterns"):
+            merged[section] = _dedup_entries(merged[section])
         if merged:
             logger.info(
                 "custom-dangerous-patterns: loaded config from %d files in %s",
@@ -311,12 +317,26 @@ def _validate_config(raw: dict[str, Any]) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
+_CLI_WRITE_FILENAME = "99-custom.yaml"
+"""Filename used in directory mode for all CLI write operations.
+
+Sorts last alphabetically so it has highest merge precedence. When
+config is a directory, CLI commands (add, remove, enable, disable)
+write only the delta (changed entries) to this file — user-created
+files are never touched and the full merged config is never written
+here, avoiding pattern duplication on reload.
+"""
+
+
 def save_config(config_dict: dict[str, Any], path: Path | None = None) -> Path:
     """Serialize the config dict back to YAML and write to disk.
 
     Uses ruamel.yaml for comment-preserving round-trips. For single-file
     configs, writes atomically (temp file + rename). For directory configs,
-    writes to the last file in the merge order.
+    computes the delta between user files and the merged config, writing
+    only the changed entries to a dedicated ``99-custom.yaml`` file that
+    sorts last in the merge order — user-created files are never touched
+    and pattern duplication on reload is avoided.
 
     Args:
         config_dict: The validated config dict with 'patterns',
@@ -330,30 +350,178 @@ def save_config(config_dict: dict[str, Any], path: Path | None = None) -> Path:
         ImportError: If ruamel.yaml is not installed.
         OSError: If the file cannot be written.
     """
-    from ruamel.yaml import YAML
-
     if path is None:
         path = _resolve_config_path()
 
-    # Directory mode: write to the last file (highest precedence)
+    # Directory mode: compute delta and write only changed entries
     if path.is_dir():
-        yaml_files = sorted(path.glob("*.yaml"))
-        if yaml_files:
-            path = yaml_files[-1]
-        else:
-            path = path / "00-custom.yaml"
+        target = path / _CLI_WRITE_FILENAME
+        user_config = _load_yaml_excluding(path, _CLI_WRITE_FILENAME)
+        user_validated = (
+            _validate_config(user_config)
+            if user_config
+            else {"patterns": [], "allow_patterns": [], "deny_patterns": []}
+        )
+        # Also dedup the user baseline so comparison is correct
+        for section in ("patterns", "allow_patterns", "deny_patterns"):
+            user_validated[section] = _dedup_entries(user_validated[section])
+        delta = _compute_delta(user_validated, config_dict)
 
-    # Build the output dict — only include non-empty sections
-    output: dict[str, Any] = {}
+        # Build output from delta (only non-empty sections)
+        output: dict[str, Any] = {}
+        for key in ("patterns", "allow_patterns", "deny_patterns"):
+            entries = delta.get(key, [])
+            if entries:
+                output[key] = _clean_for_serialization(entries)
+
+        if not output:
+            # Nothing changed — no-op
+            return target
+
+        _write_yaml(output, target)
+        logger.info(
+            "custom-dangerous-patterns: saved %d changed entries to %s",
+            sum(len(v) for v in output.values()),
+            target,
+        )
+        return target
+
+    # Single file mode: write everything
+    output = {}
     for key in ("patterns", "allow_patterns", "deny_patterns"):
         entries = config_dict.get(key, [])
         if entries:
             output[key] = _clean_for_serialization(entries)
 
-    # Ensure parent directory exists
+    _write_yaml(output, path)
+    return path
+
+
+def _load_yaml_excluding(directory: Path, exclude_filename: str) -> dict[str, Any] | None:
+    """Load all *.yaml files in a directory except the excluded one.
+
+    Merges using the same extend/override semantics as _load_yaml.
+    Used by save_config to compute the baseline of user-created files.
+    """
+    yaml_files = sorted(
+        [f for f in directory.glob("*.yaml") if f.name != exclude_filename]
+    )
+    if not yaml_files:
+        return None
+
+    merged: dict[str, Any] = {}
+    for yf in yaml_files:
+        single = _load_single_yaml(yf)
+        if single:
+            for key, val in single.items():
+                if key in merged and isinstance(merged[key], list) and isinstance(val, list):
+                    merged[key].extend(val)
+                else:
+                    merged[key] = val
+            merged.setdefault("patterns", [])
+            merged.setdefault("allow_patterns", [])
+            merged.setdefault("deny_patterns", [])
+
+    return merged if merged else None
+
+
+def _pattern_key(entry: dict[str, Any]) -> str:
+    """Return the comparison key for a pattern entry (its regex pattern)."""
+    return entry.get("pattern", "")
+
+
+def _dedup_entries(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Deduplicate pattern entries by pattern key, keeping the last occurrence.
+
+    When the same regex pattern appears in multiple YAML files, later
+    files' version wins. This is critical for directory mode where
+    99-custom.yaml (sorted last) needs its enabled=False override to
+    correctly suppress patterns removed from user-created files.
+    """
+    seen: dict[str, int] = {}
+    deduped: list[dict[str, Any]] = []
+    for entry in entries:
+        key = _pattern_key(entry)
+        if key in seen:
+            deduped[seen[key]] = entry  # replace previous occurrence
+        else:
+            seen[key] = len(deduped)
+            deduped.append(entry)
+    return deduped
+
+
+def _normalized_for_compare(entry: dict[str, Any]) -> dict[str, Any]:
+    """Normalize an entry for comparison (same as _clean_for_serialization)."""
+    out: dict[str, Any] = {
+        "pattern": entry["pattern"],
+        "description": entry.get("description", ""),
+    }
+    if entry.get("examples"):
+        out["examples"] = entry["examples"]
+    if entry.get("enabled") is False:
+        out["enabled"] = False
+    if entry.get("group"):
+        out["group"] = entry["group"]
+    if entry.get("protected") is True:
+        out["protected"] = True
+    return out
+
+
+def _compute_delta(
+    user_config: dict[str, Any],
+    merged_config: dict[str, Any],
+) -> dict[str, list[dict[str, Any]]]:
+    """Compute which entries changed between user files and the merged config.
+
+    Returns a dict with the same keys as config ('patterns',
+    'allow_patterns', 'deny_patterns'), each containing only
+    the entries that differ from the user baseline.
+
+    Keys are compared by pattern regex string. Entries present in
+    merged but not in user files are new. Entries with the same
+    pattern but different fields are modified. Entries removed
+    from user files (not in merged) are written with enabled=False
+    to prevent them from reappearing on reload.
+    """
+    delta: dict[str, list[dict[str, Any]]] = {}
+
+    for section in ("patterns", "allow_patterns", "deny_patterns"):
+        user_entries = user_config.get(section, [])
+        merged_entries = merged_config.get(section, [])
+
+        user_by_key = {_pattern_key(e): e for e in user_entries}
+        merged_by_key = {_pattern_key(e): e for e in merged_entries}
+
+        delta_entries: list[dict[str, Any]] = []
+
+        # New or modified entries in merged config
+        for entry in merged_entries:
+            key = _pattern_key(entry)
+            if key not in user_by_key:
+                delta_entries.append(entry)
+            elif _normalized_for_compare(user_by_key[key]) != _normalized_for_compare(entry):
+                delta_entries.append(entry)
+
+        # Entries removed from user files — write as disabled to prevent
+        # them reappearing on reload (since they're still in the user file)
+        for key, entry in user_by_key.items():
+            if key not in merged_by_key:
+                removed = dict(entry)
+                removed["enabled"] = False
+                delta_entries.append(removed)
+
+        if delta_entries:
+            delta[section] = delta_entries
+
+    return delta
+
+
+def _write_yaml(output: dict[str, Any], path: Path) -> None:
+    """Write a YAML dict to disk atomically using ruamel.yaml."""
+    from ruamel.yaml import YAML
+
     path.parent.mkdir(parents=True, exist_ok=True)
 
-    # Write atomically: temp file, then rename
     import tempfile
 
     tmp_path = Path(tempfile.mktemp(suffix=".yaml", dir=path.parent))
@@ -364,17 +532,10 @@ def save_config(config_dict: dict[str, Any], path: Path | None = None) -> Path:
         with open(tmp_path, "w", encoding="utf-8") as f:
             yaml.dump(output, f)
         tmp_path.replace(path)
-        logger.info(
-            "custom-dangerous-patterns: saved config to %s",
-            path,
-        )
     except Exception:
-        # Clean up temp file on failure
         if tmp_path.exists():
             tmp_path.unlink()
         raise
-
-    return path
 
 
 def _clean_for_serialization(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:

@@ -189,8 +189,19 @@ test_p.set_defaults(func=_handle_test)
 
 - CLI commands load config fresh each invocation (`load_config(force=True, integrity_check=False)`). They bypass the module-level cache.
 - Write commands (`enable`, `disable`, `add`, `remove`) modify the YAML config on disk and remind the user to restart Hermes.
+- **Directory mode writes to `99-custom.yaml`.** When the config path is a directory, write commands never touch user-created files. Instead, they write the full merged config to a dedicated `99-custom.yaml` file that sorts last in the merge order (highest precedence). This avoids pattern duplication on reload.
 - The `test` command uses the same `patterns.py` matching functions as the runtime monkey-patches, guaranteeing consistent results.
 - CLI commands are invoked by Hermes's plugin CLI system but still use the same relative import convention as the rest of the plugin (`from .config import ...`, `from .patterns import ...`).
+
+### Directory Mode Writes
+
+When the config path is a directory, CLI write commands (`add`, `remove`, `enable`, `disable`) behave differently:
+
+1. **Never touch user-created files.** Files like `10-cloud.yaml` and `20-database.yaml` are read-only as far as CLI commands are concerned.
+2. **Delta-only writes.** `save_config()` computes a delta between the merged config and the user file baseline. Only entries that differ — new, modified, or removed — are written to `99-custom.yaml`.
+3. **Removal as disabled.** When a pattern is removed via CLI, the delta writes it to `99-custom.yaml` with `enabled: False` so the removal persists across reloads.
+4. **Deduplication on reload.** During directory loading, `_load_yaml()` deduplicates pattern entries by regex key, keeping the last occurrence (later files win). This ensures `99-custom.yaml`'s `enabled: False` correctly overrides the user file's `enabled: True` without duplication.
+5. **To reset CLI-managed patterns**, delete `99-custom.yaml`.
 
 ### Adding a new subcommand
 
