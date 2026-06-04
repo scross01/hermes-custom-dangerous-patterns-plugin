@@ -175,9 +175,135 @@ def cmd_test(
     verbose: bool = False,
     skip_builtins: bool = False,
 ) -> tuple[str, int]:
-    """Test a command against all pattern types."""
-    # Stub — implemented in Chunk 3
-    return ("test: not yet implemented\n", 1)
+    """Test a command against all pattern types and show the result.
+
+    Simulates the exact evaluation order used at runtime:
+      1. Deny patterns (block immediately, no prompt)
+      2. Allow patterns (exempt from all checks)
+      3. Block patterns (trigger approval prompt)
+      4. Built-in patterns (alongside block patterns)
+    """
+    from .config import load_config
+    from .patterns import compile_all, is_deny_pattern, is_allow_pattern, get_block_patterns
+
+    if not command or not command.strip():
+        return ("Error: command must not be empty.\n", 1)
+
+    config = load_config(force=True, integrity_check=False)
+    compile_all(config)
+
+    lines: list[str] = []
+    lines.append(f"Evaluating: {command}")
+    lines.append("")
+
+    # Step 1: Deny patterns
+    deny_match = is_deny_pattern(command)
+    lines.append("DENY patterns — checked first, block immediately:")
+    if deny_match:
+        lines.append(f"  \u2713 MATCH: {deny_match}")
+    else:
+        lines.append("  (no matches)")
+    lines.append("")
+
+    # Step 2: Allow patterns
+    allow_match = is_allow_pattern(command)
+    lines.append("ALLOW patterns — checked second, exempt from all checks:")
+    if allow_match:
+        lines.append(f"  \u2713 MATCH: {allow_match}")
+    else:
+        lines.append("  (no matches)")
+    lines.append("")
+
+    # Step 3: Block patterns (only if no deny match)
+    block_matches: list[tuple[str, str]] = []
+    if deny_match is None:
+        lines.append("BLOCK patterns — checked third, trigger approval prompt:")
+        for regex_obj, desc in get_block_patterns():
+            cmd_normalized = _normalize_for_test(command)
+            if regex_obj.search(cmd_normalized):
+                block_matches.append((regex_obj.pattern, desc))
+        if block_matches:
+            for pattern_str, desc in block_matches:
+                lines.append(f"  \u2713 MATCH: {desc}")
+                if verbose:
+                    lines.append(f"    Pattern: {pattern_str}")
+        else:
+            lines.append("  (no matches)")
+    else:
+        lines.append("BLOCK patterns — skipped (deny pattern already matched)")
+    lines.append("")
+
+    # Step 4: Built-in patterns
+    if not skip_builtins:
+        lines.append("BUILT-IN patterns — checked alongside block patterns:")
+        builtin_matches = _check_builtins_for_test(command, verbose)
+        if builtin_matches:
+            for bm in builtin_matches:
+                lines.append(f"  \u2713 MATCH: {bm}")
+        else:
+            lines.append("  (no matches)")
+        lines.append("")
+
+    # Determine result
+    if deny_match is not None:
+        lines.append("RESULT: DENY — command BLOCKED immediately, no prompt")
+    elif allow_match is not None:
+        lines.append("RESULT: ALLOW — command runs immediately, no prompt")
+        if block_matches:
+            lines.append("(Block patterns skipped — allow wins over block)")
+    elif block_matches or (not skip_builtins and _check_builtins_for_test(command, False)):
+        lines.append(
+            "RESULT: APPROVAL PROMPT — user will see "
+            "[o]nce/[s]ession/[a]lways/[d]eny"
+        )
+    else:
+        lines.append(
+            "RESULT: PASS — no patterns matched. "
+            "Command would run normally without any approval prompt."
+        )
+
+    return ("\n".join(lines) + "\n", 0)
+
+
+def _normalize_for_test(command: str) -> str:
+    """Normalize a command string for pattern matching in the test command.
+
+    Mirrors the normalization in patterns._normalize but works standalone.
+    """
+    import re as _re
+    import unicodedata
+
+    cmd = command
+    try:
+        from tools.ansi_strip import strip_ansi
+        cmd = strip_ansi(cmd)
+    except ImportError:
+        cmd = _re.sub(r"\x1b\[[0-9;]*[a-zA-Z]", "", cmd)
+
+    cmd = cmd.replace("\x00", "")
+    cmd = unicodedata.normalize("NFKC", cmd)
+    return cmd
+
+
+def _check_builtins_for_test(
+    command: str,
+    verbose: bool,
+) -> list[str]:
+    """Check if the command matches any built-in patterns."""
+    import re as _re
+
+    cmd = _normalize_for_test(command)
+    matches: list[str] = []
+    for pat, desc in _BUILTIN_PATTERNS:
+        try:
+            if _re.search(pat, cmd, _re.IGNORECASE | _re.DOTALL):
+                if verbose:
+                    matches.append(f"{desc} (pattern: {pat})")
+                else:
+                    matches.append(desc)
+        except _re.error:
+            pass
+    return matches
 
 
 def cmd_init(
