@@ -1,4 +1,4 @@
-"""Tests for CLI command handlers (v0.3.0).
+"""Tests for CLI command handlers.
 
 Tests cmd_list, cmd_test, and cmd_init — the P0 commands.
 All other command handlers are stubs and tested in later chunks.

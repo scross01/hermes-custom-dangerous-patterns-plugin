@@ -105,7 +105,7 @@ The agent can read/write `~/.hermes/custom-dangerous-patterns.yaml`. It can add 
 
 ## Ad-hoc pattern testing
 
-**Preferred (v0.3.0+):** Use the CLI:
+**Preferred:** Use the CLI:
 
 ```bash
 hermes custom-dangerous-patterns test "vultr instance list"
@@ -136,7 +136,7 @@ print('Allow match:', is_allow_pattern('vultr instance list'))
 1. `$HERMES_CUSTOM_PATTERNS_PATH` env var
 2. `~/.hermes/custom-dangerous-patterns.yaml`
 
-## CLI architecture (v0.3.0)
+## CLI architecture
 
 The plugin exposes a `hermes custom-dangerous-patterns` CLI command group via Hermes's plugin CLI system. CLI commands run **outside** the Hermes agent runtime — they are standalone config management and introspection tools. No monkey-patching, no approval flow involvement.
 

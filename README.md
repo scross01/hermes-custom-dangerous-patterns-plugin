@@ -387,7 +387,7 @@ allow_patterns:
     description: 'Shell completion scripts are safe'
 ```
 
-## CLI Reference (v0.3.0)
+## CLI Reference
 
 All commands follow the `hermes custom-dangerous-patterns <verb>` pattern, consistent with other Hermes subcommands like `hermes plugins`.
 
@@ -647,7 +647,7 @@ hermes-custom-dangerous-patterns-plugin/
 │   ├── test_config.py    # Config loading, validation, integrity tests
 │   ├── test_patterns.py  # Pattern compilation and matching tests
 │   ├── test_init.py      # Plugin registration and monkey-patch tests
-│   └── test_cli.py       # CLI command handler tests (v0.3.0)
+│   └── test_cli.py       # CLI command handler tests
 ├── README.md            # This file
 ├── LICENSE              # MIT
 └── .gitignore

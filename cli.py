@@ -1,4 +1,4 @@
-"""CLI command handlers for hermes custom-dangerous-patterns (v0.3.0).
+"""CLI command handlers for hermes custom-dangerous-patterns.
 
 Pure config management and introspection — no monkey-patching, no Hermes
 runtime dependencies. Each command handler is a standalone function that

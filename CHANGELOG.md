@@ -1,24 +1,19 @@
 # Change Log
 
-## 0.3.0 — 2026-06-04
+## 0.3.0
 
-### Added — `hermes custom-patterns` CLI
-- **`list`** — List all custom patterns with filtering by type, group, search, status
-- **`test <command>`** — Test a command against all pattern types (deny, allow, block, built-in)
-- **`init`** — Create a starter config with first-run guidance
-- **`enable / disable`** — Toggle patterns by index, description, or group
-- **`validate`** — Validate config syntax and regexes (supports `--quiet` for CI)
-- **`info`** — Dashboard showing plugin state, integrity, groups, protected patterns
-- **`logs`** — Extract plugin-specific log entries from Hermes logs
-- **`add / remove`** — Add/remove patterns interactively or via CLI flags
-- `--dry-run` flag on all write commands for previewing changes
-- `list --builtins` for viewing Hermes built-in patterns
-- `test --skip-builtins` to focus on custom patterns only
-
-### Changed
-- Switched from PyYAML to ruamel.yaml for YAML handling
-- Added `save_config()` for CLI write-back support
-- Added `plugin.yaml` dependency declaration for ruamel.yaml
+- Added — `hermes custom-dangerous-patterns` CLI
+    - **`list`** — List all custom patterns with filtering by type, group, search, status
+    - **`test <command>`** — Test a command against all pattern types (deny, allow, block, built-in)
+    - **`init`** — Create a starter config with first-run guidance
+    - **`enable / disable`** — Toggle patterns by index, description, or group
+    - **`validate`** — Validate config syntax and regexes (supports `--quiet` for CI)
+    - **`info`** — Dashboard showing plugin state, integrity, groups, protected patterns
+    - **`logs`** — Extract plugin-specific log entries from Hermes logs
+    - **`add / remove`** — Add/remove patterns interactively or via CLI flags
+    - `--dry-run` flag on all write commands for previewing changes
+    - `list --builtins` for viewing Hermes built-in patterns
+    - `test --skip-builtins` to focus on custom patterns only
 
 ## 0.2.0
 

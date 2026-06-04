@@ -1,4 +1,4 @@
-"""Log extraction and filtering for the custom-dangerous-patterns plugin (v0.3.0).
+"""Log extraction and filtering for the custom-dangerous-patterns plugin.
 
 Extracts plugin-specific log entries from all *.log files under
 ~/.hermes/logs/. Supports level filtering, date filtering,

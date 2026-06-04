@@ -96,7 +96,7 @@ def register(ctx: Any) -> None:
         #    tool and the agent treats the result as a regular error.
         ctx.register_hook("pre_tool_call", _make_deny_hook(is_deny_pattern, is_allow_pattern))
 
-    # 6. Register CLI subcommands (v0.3.0)
+    # 6. Register CLI subcommands
     _register_cli(ctx)
 
     if not block_count and not allow_count and not deny_count:
@@ -105,7 +105,7 @@ def register(ctx: Any) -> None:
 
 
 # ---------------------------------------------------------------------------
-# CLI registration (v0.3.0)
+# CLI registration
 # ---------------------------------------------------------------------------
 
 

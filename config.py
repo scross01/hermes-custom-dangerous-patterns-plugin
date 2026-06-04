@@ -5,20 +5,6 @@ and returns a structured config dict. Caches the result per-process so
 repeated reads during pattern injection are free.
 
 Config path can be overridden via HERMES_CUSTOM_PATTERNS_PATH env var.
-
-v0.2.0: Config hash tracking and protected pattern tier. SHA-256 hash
-of the config is persisted across sessions to detect tampering.
-Protected patterns (protected: true) are verified at load.
-
-v0.3.0: Switched from PyYAML to ruamel.yaml for YAML handling.
-Added save_config() for CLI write-back support. Note: CLI write
-operations (add, remove, enable, disable) will not preserve
-user comments/formatting in the config file. The validated config
-dict is a normalized representation — YAML comments are lost
-at load time because the validation step builds a fresh dict.
-Full round-trip comment preservation is deferred to a future
-release requiring in-place editing of ruamel.yaml's CommentedMap
-structures.
 """
 
 from __future__ import annotations
@@ -79,7 +65,7 @@ def _resolve_config_path() -> Path:
 
 
 def resolve_config_path() -> Path:
-    """Public API for path resolution (v0.3.0).
+    """Public API for path resolution.
 
     Same as _resolve_config_path but importable by CLI modules.
     """
@@ -87,7 +73,7 @@ def resolve_config_path() -> Path:
 
 
 def get_config_path_display() -> str:
-    """Return a human-readable description of the config path (v0.3.0).
+    """Return a human-readable description of the config path.
 
     Includes whether the config is a single file or directory.
     """
@@ -320,7 +306,7 @@ def _validate_config(raw: dict[str, Any]) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
-# Config write-back (v0.3.0)
+# Config write-back
 # ---------------------------------------------------------------------------
 
 
