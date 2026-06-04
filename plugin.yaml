@@ -7,3 +7,5 @@ description: >-
   once/session/always/deny approval flow.
 author: Stephen Cross
 license: MIT
+dependencies:
+  - ruamel.yaml>=0.18.0

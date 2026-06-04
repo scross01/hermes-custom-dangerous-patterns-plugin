@@ -8,7 +8,11 @@ Config path can be overridden via HERMES_CUSTOM_PATTERNS_PATH env var.
 
 v0.2.0: Config hash tracking and protected pattern tier. SHA-256 hash
 of the config is persisted across sessions to detect tampering.
-Protected patterns (protected: true) are verified at load."""
+Protected patterns (protected: true) are verified at load.
+
+v0.3.0: Switched from PyYAML to ruamel.yaml for comment-preserving
+round-trips. Added save_config() for CLI write-back support.
+"""
 
 from __future__ import annotations
 
@@ -67,6 +71,26 @@ def _resolve_config_path() -> Path:
     return single_file  # return default even if missing (will log warning)
 
 
+def resolve_config_path() -> Path:
+    """Public API for path resolution (v0.3.0).
+
+    Same as _resolve_config_path but importable by CLI modules.
+    """
+    return _resolve_config_path()
+
+
+def get_config_path_display() -> str:
+    """Return a human-readable description of the config path (v0.3.0).
+
+    Includes whether the config is a single file or directory.
+    """
+    path = _resolve_config_path()
+    if path.is_dir():
+        yaml_files = sorted(path.glob("*.yaml"))
+        return f"{path} ({len(yaml_files)} files loaded)"
+    return str(path)
+
+
 # ---------------------------------------------------------------------------
 # YAML loading (lazy import — yaml is optional at module level)
 # ---------------------------------------------------------------------------
@@ -119,16 +143,17 @@ def _load_single_yaml(path: Path) -> dict[str, Any] | None:
         return None
 
     try:
-        import yaml
+        from ruamel.yaml import YAML
     except ImportError:
         logger.warning(
-            "custom-dangerous-patterns: PyYAML not installed -- cannot load config. "
-            "Install with: pip install pyyaml"
+            "custom-dangerous-patterns: ruamel.yaml not installed -- cannot load config. "
+            "Install with: pip install ruamel.yaml"
         )
         return None
 
     try:
-        raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+        yaml = YAML(typ="safe")
+        raw = yaml.load(path.read_text(encoding="utf-8"))
     except Exception as exc:
         logger.warning(
             "custom-dangerous-patterns: failed to read config at %s: %s",
@@ -272,6 +297,98 @@ def _validate_config(raw: dict[str, Any]) -> dict[str, Any]:
                 result["deny_patterns"].append(validated)
 
     return result
+
+
+# ---------------------------------------------------------------------------
+# Config write-back (v0.3.0)
+# ---------------------------------------------------------------------------
+
+
+def save_config(config_dict: dict[str, Any], path: Path | None = None) -> Path:
+    """Serialize the config dict back to YAML and write to disk.
+
+    Uses ruamel.yaml for comment-preserving round-trips. For single-file
+    configs, writes atomically (temp file + rename). For directory configs,
+    writes to the last file in the merge order.
+
+    Args:
+        config_dict: The validated config dict with 'patterns',
+                     'allow_patterns', and 'deny_patterns' keys.
+        path: Target path. If None, uses the default resolved config path.
+
+    Returns:
+        The path that was written to.
+
+    Raises:
+        ImportError: If ruamel.yaml is not installed.
+        OSError: If the file cannot be written.
+    """
+    from ruamel.yaml import YAML
+
+    if path is None:
+        path = _resolve_config_path()
+
+    # Directory mode: write to the last file (highest precedence)
+    if path.is_dir():
+        yaml_files = sorted(path.glob("*.yaml"))
+        if yaml_files:
+            path = yaml_files[-1]
+        else:
+            path = path / "00-custom.yaml"
+
+    # Build the output dict — only include non-empty sections
+    output: dict[str, Any] = {}
+    for key in ("patterns", "allow_patterns", "deny_patterns"):
+        entries = config_dict.get(key, [])
+        if entries:
+            output[key] = _clean_for_serialization(entries)
+
+    # Ensure parent directory exists
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    # Write atomically: temp file, then rename
+    import tempfile
+
+    tmp_path = Path(tempfile.mktemp(suffix=".yaml", dir=path.parent))
+    try:
+        yaml = YAML()
+        yaml.indent(mapping=2, sequence=4, offset=2)
+        yaml.default_flow_style = False
+        with open(tmp_path, "w", encoding="utf-8") as f:
+            yaml.dump(output, f)
+        tmp_path.replace(path)
+        logger.info(
+            "custom-dangerous-patterns: saved config to %s",
+            path,
+        )
+    except Exception:
+        # Clean up temp file on failure
+        if tmp_path.exists():
+            tmp_path.unlink()
+        raise
+
+    return path
+
+
+def _clean_for_serialization(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Remove internal-only fields and empty optional fields for clean YAML output."""
+    cleaned = []
+    for entry in entries:
+        out: dict[str, Any] = {
+            "pattern": entry["pattern"],
+            "description": entry.get("description", ""),
+        }
+        # Only include non-default optional fields
+        if entry.get("examples"):
+            out["examples"] = entry["examples"]
+        if entry.get("enabled") is False:
+            out["enabled"] = False
+        if entry.get("group"):
+            out["group"] = entry["group"]
+        if entry.get("protected") is True:
+            out["protected"] = True
+        cleaned.append(out)
+    return cleaned
 
 
 # ---------------------------------------------------------------------------

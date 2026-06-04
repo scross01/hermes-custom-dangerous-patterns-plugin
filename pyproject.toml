@@ -7,7 +7,7 @@ name = "hermes-custom-dangerous-patterns"
 version = "0.2.0"
 description = "Hermes Agent plugin for custom dangerous command patterns"
 requires-python = ">=3.11"
-dependencies = ["PyYAML"]
+dependencies = ["ruamel.yaml>=0.18"]
 
 # Not a distributable package — installed by Hermes via flat file copy to
 # ~/.hermes/plugins/custom-dangerous-patterns/.  Explicitly declaring no
