@@ -21,6 +21,7 @@ They are checked AFTER allow patterns but BEFORE block patterns.
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -95,9 +96,38 @@ def register(ctx: Any) -> None:
         #    tool and the agent treats the result as a regular error.
         ctx.register_hook("pre_tool_call", _make_deny_hook(is_deny_pattern, is_allow_pattern))
 
+    # 6. Register CLI subcommands (v0.3.0)
+    _register_cli_commands(ctx)
+
     if not block_count and not allow_count and not deny_count:
         logger.info("custom-dangerous-patterns: no active patterns, plugin idle")
         return
+
+
+# ---------------------------------------------------------------------------
+# CLI registration (v0.3.0)
+# ---------------------------------------------------------------------------
+
+
+def _register_cli_commands(ctx: Any) -> None:
+    """Register hermes custom-patterns CLI subcommands.
+
+    Called at plugin startup so CLI commands are available even when
+    no config exists (init needs to work before config is created).
+    """
+    try:
+        from . import cli
+
+        ctx.register_cli_command(
+            "custom-patterns",
+            cli.register_subcommands,
+            help="Manage custom dangerous command patterns",
+        )
+    except Exception:
+        logger.warning(
+            "custom-dangerous-patterns: failed to register CLI commands",
+            exc_info=True,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -362,7 +392,7 @@ def _check_allow_shadowing(config: dict, is_allow_pattern) -> None:
                 )
 
 
-def _patterns_overlap(re1: "re.Pattern", re2: "re.Pattern") -> bool:
+def _patterns_overlap(re1: re.Pattern, re2: re.Pattern) -> bool:
     """Check if two compiled regex patterns can match overlapping strings.
 
     A simple heuristic: if the patterns share word-like tokens of length
@@ -381,8 +411,6 @@ def _patterns_overlap(re1: "re.Pattern", re2: "re.Pattern") -> bool:
 
 def _extract_tokens(pattern: str) -> list[str]:
     """Extract word-like tokens from a regex pattern for overlap check."""
-    import re
-
     # Remove word-boundary markers (e.g., \baws -> aws)
     cleaned = re.sub(r"\\b", " ", pattern)
     # Remove other regex metacharacters

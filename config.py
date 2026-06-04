@@ -10,8 +10,15 @@ v0.2.0: Config hash tracking and protected pattern tier. SHA-256 hash
 of the config is persisted across sessions to detect tampering.
 Protected patterns (protected: true) are verified at load.
 
-v0.3.0: Switched from PyYAML to ruamel.yaml for comment-preserving
-round-trips. Added save_config() for CLI write-back support.
+v0.3.0: Switched from PyYAML to ruamel.yaml for YAML handling.
+Added save_config() for CLI write-back support. Note: CLI write
+operations (add, remove, enable, disable) will not preserve
+user comments/formatting in the config file. The validated config
+dict is a normalized representation — YAML comments are lost
+at load time because the validation step builds a fresh dict.
+Full round-trip comment preservation is deferred to a future
+release requiring in-place editing of ruamel.yaml's CommentedMap
+structures.
 """
 
 from __future__ import annotations
