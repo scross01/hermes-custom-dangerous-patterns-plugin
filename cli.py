@@ -10,6 +10,7 @@ ctx.register_cli_command() in __init__.py.
 
 from __future__ import annotations
 
+import re
 import sys
 from collections.abc import Callable
 from pathlib import Path
@@ -403,8 +404,6 @@ def _load_example_config(enabled: bool = True) -> dict[str, Any]:
     Tries to load from the installed plugin path first, then falls back
     to the built-in minimal config.
     """
-    from pathlib import Path
-
     # Try the shipped examples file
     example_paths = [
         Path(__file__).resolve().parent / "examples" / "custom-dangerous-patterns.yaml",
@@ -479,14 +478,13 @@ def _toggle_patterns(
     action = "enabled" if enable else "disabled"
     new_state = True if enable else False
 
-    # Build flat list of all patterns with metadata
+    # Build flat list of all patterns (add _section to originals so
+    # modifications below affect the real config dict entries)
     all_entries: list[dict[str, Any]] = []
     for section_key in ("patterns", "allow_patterns", "deny_patterns"):
         for entry in config.get(section_key, []):
-            all_entries.append({
-                **entry,
-                "_section": section_key,
-            })
+            entry["_section"] = section_key
+            all_entries.append(entry)
 
     if not all_entries:
         return ("No custom patterns defined. Nothing to change.\n", 1)
@@ -559,6 +557,10 @@ def _toggle_patterns(
     for entry in matched:
         entry["enabled"] = new_state
         changed.append(entry)
+
+    # Clean up _section marker before saving
+    for entry in all_entries:
+        entry.pop("_section", None)
 
     save_config(config, config_path)
 
@@ -672,6 +674,9 @@ def cmd_info() -> tuple[str, int]:
     if hash_path.is_file():
         try:
             import hashlib
+            import os
+            from datetime import datetime
+
             previous = _load_hash_data(hash_path)
             prev_hash = previous.get("config_hash")
             if prev_hash and config_path.is_file():
@@ -682,11 +687,10 @@ def cmd_info() -> tuple[str, int]:
                     lines.append("Integrity: \u2713 hash matches previous session")
                 else:
                     lines.append("Integrity: \u26a0 hash changed since last session")
-            import os
             mtime = os.path.getmtime(str(config_path))
-            from datetime import datetime
             lines.append(
-                f"Last changed: {datetime.fromtimestamp(mtime).strftime('%Y-%m-%d %H:%M:%S')}"
+                f"Last changed: "
+                f"{datetime.fromtimestamp(mtime).strftime('%Y-%m-%d %H:%M:%S')}"
             )
         except Exception:
             lines.append("Integrity: unknown")
@@ -695,7 +699,8 @@ def cmd_info() -> tuple[str, int]:
     config = load_config(force=True, integrity_check=False)
     lines.append("")
     lines.append("Pattern counts:")
-    for label, key in [("Block", "patterns"), ("Allow", "allow_patterns"), ("Deny", "deny_patterns")]:
+    count_sections = [("Block", "patterns"), ("Allow", "allow_patterns"), ("Deny", "deny_patterns")]
+    for label, key in count_sections:
         entries = config.get(key, [])
         active = sum(1 for e in entries if e.get("enabled", True))
         disabled = len(entries) - active
@@ -759,9 +764,25 @@ def cmd_logs(
     since: str | None = None,
     follow: bool = False,
 ) -> tuple[str, int]:
-    """Show plugin-specific log entries."""
-    # Stub — implemented in Chunk 7
-    return ("logs: not yet implemented\n", 1)
+    """Show plugin-specific log entries from the Hermes log."""
+    from .logs import extract_logs, follow_logs, format_log_entries, get_default_log_path
+
+    log_path = get_default_log_path()
+
+    if not log_path.is_file():
+        return (
+            f"No Hermes log file found at {log_path}.\n"
+            f"Logs are only available when Hermes has been run at least once.\n",
+            1,
+        )
+
+    if follow:
+        follow_logs(log_path)
+        return ("", 0)
+
+    entries = extract_logs(log_path=log_path, level=level, limit=limit, since=since)
+    lines = format_log_entries(entries, level=level)
+    return ("\n".join(lines) + "\n", 0)
 
 
 def cmd_add(
@@ -775,9 +796,150 @@ def cmd_add(
     protected: bool = False,
     dry_run: bool = False,
 ) -> tuple[str, int]:
-    """Add a pattern interactively or via flags."""
-    # Stub — implemented in Chunk 9
-    return ("add: not yet implemented\n", 1)
+    """Add a custom pattern via interactive prompts or CLI flags."""
+    from .config import load_config, resolve_config_path
+
+    config_path = resolve_config_path()
+    config = load_config(force=True, integrity_check=False)
+
+    if interactive:
+        return _add_interactive(config, config_path, dry_run)
+
+    # Non-interactive mode: require --type, --pattern, --description
+    if not pattern_type or not pattern or not description:
+        return (
+            "Error: --type, --pattern, and --description are required "
+            "in non-interactive mode.\n"
+            "Use --interactive for guided entry.\n",
+            1,
+        )
+
+    return _add_noninteractive(
+        config, config_path, pattern_type, pattern, description,
+        group or "", examples or [], enabled_flag if enabled_flag is not None else True,
+        protected, dry_run,
+    )
+
+
+def _add_interactive(
+    config: dict[str, Any], config_path: Path, dry_run: bool,
+) -> tuple[str, int]:
+    """Guided interactive pattern entry."""
+    print()
+    print("Pattern type:")
+    print("  [1] block  — triggers approval prompt (once/session/always/deny)")
+    print("  [2] allow  — command runs immediately, no prompt")
+    print("  [3] deny   — command blocked immediately, no prompt")
+
+    try:
+        choice = input("Choose type [1]: ").strip() or "1"
+    except (EOFError, KeyboardInterrupt):
+        return ("\nCancelled.\n", 1)
+
+    type_map = {"1": "block", "2": "allow", "3": "deny"}
+    pattern_type = type_map.get(choice)
+    if not pattern_type:
+        return (f"Invalid choice: {choice}. Use 1, 2, or 3.\n", 1)
+
+    try:
+        pattern = input("Enter regex pattern: ").strip()
+        if not pattern:
+            return ("Pattern cannot be empty.\n", 1)
+    except (EOFError, KeyboardInterrupt):
+        return ("\nCancelled.\n", 1)
+
+    try:
+        description = input("Enter description: ").strip()
+        if not description:
+            return ("Description cannot be empty.\n", 1)
+    except (EOFError, KeyboardInterrupt):
+        return ("\nCancelled.\n", 1)
+
+    try:
+        group = input("Group (optional, press Enter to skip): ").strip()
+        _ = group  # use later
+    except (EOFError, KeyboardInterrupt):
+        return ("\nCancelled.\n", 1)
+
+    try:
+        enabled = input("Enabled? [Y/n]: ").strip().lower()
+        enabled_flag = enabled != "n"
+    except (EOFError, KeyboardInterrupt):
+        return ("\nCancelled.\n", 1)
+
+    try:
+        prot = input("Protected? [y/N]: ").strip().lower()
+        protected = prot == "y"
+    except (EOFError, KeyboardInterrupt):
+        return ("\nCancelled.\n", 1)
+
+    return _add_noninteractive(
+        config, config_path, pattern_type, pattern, description,
+        group, [], enabled_flag, protected, dry_run,
+    )
+
+
+def _add_noninteractive(
+    config: dict[str, Any],
+    config_path: Path,
+    pattern_type: str,
+    pattern: str,
+    description: str,
+    group: str,
+    examples: list[str],
+    enabled_flag: bool,
+    protected: bool,
+    dry_run: bool,
+) -> tuple[str, int]:
+    """Add a pattern via CLI flags."""
+    from .config import save_config
+
+    # Validate regex
+    try:
+        re.compile(pattern, re.IGNORECASE | re.DOTALL)
+    except re.error as exc:
+        return (
+            f"Error: invalid regex '{pattern}': {exc}\n"
+            f"Pattern not added.\n",
+            1,
+        )
+
+    section_key = {
+        "block": "patterns",
+        "allow": "allow_patterns",
+        "deny": "deny_patterns",
+    }.get(pattern_type, "patterns")
+
+    entry = {
+        "pattern": pattern,
+        "description": description,
+        "enabled": enabled_flag,
+        "group": group,
+        "protected": protected,
+    }
+    if examples:
+        entry["examples"] = examples
+
+    if dry_run:
+        return (
+            f"Would add {pattern_type} pattern: \"{description}\"\n"
+            f"  Pattern: {pattern}\n"
+            f"  Group: {group or '(none)'}\n"
+            f"  Enabled: {enabled_flag}\n"
+            f"  Protected: {protected}\n",
+            0,
+        )
+
+    config.setdefault(section_key, []).append(entry)
+    save_config(config, config_path)
+
+    index = len(config.get(section_key, []))
+    return (
+        f"\u2713 Added {pattern_type} pattern: \"{description}\"\n"
+        f"  Index: [{index}]\n"
+        f"{_config_update_reminder()}",
+        0,
+    )
 
 
 def cmd_remove(
@@ -787,8 +949,203 @@ def cmd_remove(
     dry_run: bool = False,
 ) -> tuple[str, int]:
     """Remove a pattern interactively or by index/description."""
-    # Stub — implemented in Chunk 9
-    return ("remove: not yet implemented\n", 1)
+    from .config import load_config, resolve_config_path
+
+    config_path = resolve_config_path()
+    if not config_path.exists():
+        return (
+            f"No config found at {config_path}.\n"
+            f"Run `hermes custom-patterns init` to create a starter config.\n",
+            1,
+        )
+
+    config = load_config(force=True, integrity_check=False)
+
+    # Build flat index (add _section to originals for mutation tracking)
+    all_entries: list[dict[str, Any]] = []
+    for section_key in ("patterns", "allow_patterns", "deny_patterns"):
+        for entry in config.get(section_key, []):
+            entry["_section"] = section_key
+            all_entries.append(entry)
+
+    if not all_entries:
+        return ("No patterns to remove. Config is empty.\n", 1)
+
+    if interactive:
+        return _remove_interactive(config, config_path, all_entries, dry_run)
+
+    # Non-interactive: target is required
+    if not target:
+        return (
+            "Must specify a pattern index, description, or --interactive.\n",
+            1,
+        )
+
+    return _remove_by_target(config, config_path, all_entries, target, pattern_type, dry_run)
+
+
+def _remove_interactive(
+    config: dict[str, Any],
+    config_path: Path,
+    all_entries: list[dict[str, Any]],
+    dry_run: bool,
+) -> tuple[str, int]:
+    """Interactive pattern removal with numbered selection."""
+    from .config import save_config
+
+    print()
+    print("Select pattern to remove:")
+    print()
+
+    sections_order = [
+        ("patterns", "BLOCK patterns:"),
+        ("allow_patterns", "ALLOW patterns:"),
+        ("deny_patterns", "DENY patterns:"),
+    ]
+
+    for section_key, label in sections_order:
+        entries = [e for e in all_entries if e["_section"] == section_key]
+        if not entries:
+            continue
+        print(label)
+        for e in entries:
+            idx = get_index(e, all_entries)
+            grp = e.get("group", "")
+            grp_str = f"  group: {grp}" if grp else ""
+            print(f"  [{idx}] {e['description']}{grp_str}")
+        print()
+
+    try:
+        choice = input("Enter index to remove (or 0 to cancel): ").strip()
+    except (EOFError, KeyboardInterrupt):
+        return ("\nCancelled.\n", 1)
+
+    try:
+        idx = int(choice)
+    except ValueError:
+        return (f"Invalid index: {choice}\n", 1)
+
+    if idx == 0:
+        return ("Cancelled.\n", 0)
+
+    if idx < 1 or idx > len(all_entries):
+        return (f"Invalid index: {idx}. Valid range: 1-{len(all_entries)}\n", 1)
+
+    entry = all_entries[idx - 1]
+
+    # Check protected
+    if entry.get("protected"):
+        return (
+            f"Pattern [{idx}] \"{entry['description']}\" is protected.\n"
+            f"Edit the config file directly to remove protected patterns.\n",
+            1,
+        )
+
+    type_label = entry["_section"].replace("_patterns", "").upper()
+    print(f"\nYou selected: [{idx}] \"{entry['description']}\" ({type_label})")
+
+    try:
+        confirm = input("Remove this pattern? This cannot be undone. [y/N]: ").strip().lower()
+    except (EOFError, KeyboardInterrupt):
+        return ("\nCancelled.\n", 1)
+
+    if confirm != "y":
+        return ("Cancelled.\n", 0)
+
+    if dry_run:
+        return (
+            f"Would remove {type_label} pattern [{idx}]: \"{entry['description']}\"\n"
+            f"Use without --dry-run to confirm.\n",
+            0,
+        )
+
+    # Remove from config (by index — entry is the original with _section)
+    section = config.get(entry["_section"], [])
+    section.pop(section.index(entry))
+    _cleanup_sections(all_entries)
+    save_config(config, config_path)
+
+    return (
+        f"\u2713 Removed {type_label} pattern [{idx}]: \"{entry['description']}\"\n"
+        f"This cannot be undone. The pattern is permanently deleted.\n"
+        f"{_config_update_reminder()}",
+        0,
+    )
+
+
+def _remove_by_target(
+    config: dict[str, Any],
+    config_path: Path,
+    all_entries: list[dict[str, Any]],
+    target: str,
+    pattern_type: str | None,
+    dry_run: bool,
+) -> tuple[str, int]:
+    """Non-interactive pattern removal by index or description match."""
+    from .config import save_config
+
+    matched: list[dict[str, Any]] = []
+
+    # Try index first
+    try:
+        idx = int(target)
+        if 1 <= idx <= len(all_entries):
+            matched = [all_entries[idx - 1]]
+    except ValueError:
+        pass
+
+    # Fall back to description substring match
+    if not matched:
+        matched = [
+            e for e in all_entries
+            if target.lower() in e.get("description", "").lower()
+        ]
+        if pattern_type:
+            type_map = {"block": "patterns", "allow": "allow_patterns", "deny": "deny_patterns"}
+            section = type_map.get(pattern_type.lower(), "")
+            matched = [e for e in matched if e["_section"] == section]
+
+        if len(matched) > 1:
+            lines = [f"Multiple patterns match '{target}'. Use index or be more specific:"]
+            for e in matched:
+                idx = get_index(e, all_entries)
+                type_label = e["_section"].replace("_patterns", "").upper()
+                lines.append(f"  [{idx}] {type_label}: {e['description']}")
+            return ("\n".join(lines) + "\n", 1)
+
+    if not matched:
+        return (f"No patterns matched '{target}'.\n", 1)
+
+    entry = matched[0]
+    eidx = get_index(entry, all_entries)
+    type_label = entry["_section"].replace("_patterns", "").upper()
+
+    # Check protected
+    if entry.get("protected"):
+        return (
+            f"Pattern [{eidx}] \"{entry['description']}\" is protected.\n"
+            f"Edit the config file directly to remove protected patterns.\n",
+            1,
+        )
+
+    if dry_run:
+        return (
+            f"Would remove {type_label} pattern [{eidx}]: \"{entry['description']}\"\n"
+            f"Use without --dry-run to confirm.\n",
+            0,
+        )
+
+    section = config.get(entry["_section"], [])
+    section.pop(section.index(entry))
+    _cleanup_sections(all_entries)
+    save_config(config, config_path)
+
+    return (
+        f"\u2713 Removed {type_label} pattern [{eidx}]: \"{entry['description']}\"\n"
+        f"This cannot be undone. The pattern is permanently deleted.\n"
+        f"{_config_update_reminder()}",
+        0,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -987,6 +1344,12 @@ def get_index(entry: dict[str, Any], all_entries: list[dict[str, Any]]) -> int:
         if e is entry:
             return i + 1
     return -1
+
+
+def _cleanup_sections(all_entries: list[dict[str, Any]]) -> None:
+    """Remove _section marker from all entries before saving."""
+    for entry in all_entries:
+        entry.pop("_section", None)
 
 
 def _config_update_reminder() -> str:
