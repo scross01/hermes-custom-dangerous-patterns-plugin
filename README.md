@@ -75,7 +75,7 @@ hermes plugins enable custom-dangerous-patterns
 Easiest — use the interactive bootstrap:
 
 ```bash
-hermes custom-patterns init --with-examples
+hermes custom-dangerous-patterns init --with-examples
 ```
 
 This creates `~/.hermes/custom-dangerous-patterns.yaml` with example patterns (all enabled for demonstration). Without `--with-examples`, creates a minimal config with safe test patterns (all disabled).
@@ -103,7 +103,7 @@ hermes gateway restart    # if using the gateway
 Test your patterns without running real commands:
 
 ```bash
-hermes custom-patterns test "vultr instance delete --instance-id cb670a12"
+hermes custom-dangerous-patterns test "vultr instance delete --instance-id cb670a12"
 ```
 
 Then try it live:
@@ -389,20 +389,20 @@ allow_patterns:
 
 ## CLI Reference (v0.3.0)
 
-All commands follow the `hermes custom-patterns <verb>` pattern, consistent with other Hermes subcommands like `hermes plugins`.
+All commands follow the `hermes custom-dangerous-patterns <verb>` pattern, consistent with other Hermes subcommands like `hermes plugins`.
 
 ### `list` — Show your patterns
 
 ```bash
-hermes custom-patterns list                    # all patterns
-hermes custom-patterns list --type block       # block patterns only
-hermes custom-patterns list --type allow       # allow patterns only
-hermes custom-patterns list --type deny        # deny patterns only
-hermes custom-patterns list --group cloud      # patterns in a group
-hermes custom-patterns list --disabled         # only disabled patterns
-hermes custom-patterns list --enabled          # only active patterns
-hermes custom-patterns list --search aws       # search descriptions and patterns
-hermes custom-patterns list --builtins         # include Hermes built-in patterns (snapshot)
+hermes custom-dangerous-patterns list                    # all patterns
+hermes custom-dangerous-patterns list --type block       # block patterns only
+hermes custom-dangerous-patterns list --type allow       # allow patterns only
+hermes custom-dangerous-patterns list --type deny        # deny patterns only
+hermes custom-dangerous-patterns list --group cloud      # patterns in a group
+hermes custom-dangerous-patterns list --disabled         # only disabled patterns
+hermes custom-dangerous-patterns list --enabled          # only active patterns
+hermes custom-dangerous-patterns list --search aws       # search descriptions and patterns
+hermes custom-dangerous-patterns list --builtins         # include Hermes built-in patterns (snapshot)
 ```
 
 > **Note:** `--builtins` uses a static snapshot of Hermes's built-in patterns
@@ -413,9 +413,9 @@ hermes custom-patterns list --builtins         # include Hermes built-in pattern
 Test a command against all patterns to see what would happen **without running it**.
 
 ```bash
-hermes custom-patterns test "vultr instance delete"
-hermes custom-patterns test "vultr account info" --verbose
-hermes custom-patterns test "git push --force" --skip-builtins
+hermes custom-dangerous-patterns test "vultr instance delete"
+hermes custom-dangerous-patterns test "vultr account info" --verbose
+hermes custom-dangerous-patterns test "git push --force" --skip-builtins
 ```
 
 Shows which patterns match and the result: **DENY** (blocked immediately), **ALLOW** (runs freely), **APPROVAL PROMPT** (interactive prompt), or **PASS** (no patterns matched).
@@ -425,9 +425,9 @@ Shows which patterns match and the result: **DENY** (blocked immediately), **ALL
 ### `init` — First-run bootstrap
 
 ```bash
-hermes custom-patterns init                    # minimal config with safe [TEST] patterns (all disabled)
-hermes custom-patterns init --with-examples    # full example config (all enabled for demonstration)
-hermes custom-patterns init --force            # overwrite existing config without prompting
+hermes custom-dangerous-patterns init                    # minimal config with safe [TEST] patterns (all disabled)
+hermes custom-dangerous-patterns init --with-examples    # full example config (all enabled for demonstration)
+hermes custom-dangerous-patterns init --force            # overwrite existing config without prompting
 ```
 
 ### `enable / disable` — Toggle patterns
@@ -435,10 +435,10 @@ hermes custom-patterns init --force            # overwrite existing config witho
 Toggle patterns on/off without editing YAML. Target by index, description substring, or group.
 
 ```bash
-hermes custom-patterns enable 1                          # by index (from list output)
-hermes custom-patterns disable "Vultr"                    # by description substring
-hermes custom-patterns enable --group cloud               # all patterns in a group
-hermes custom-patterns enable --group testing --dry-run   # preview without saving
+hermes custom-dangerous-patterns enable 1                          # by index (from list output)
+hermes custom-dangerous-patterns disable "Vultr"                    # by description substring
+hermes custom-dangerous-patterns enable --group cloud               # all patterns in a group
+hermes custom-dangerous-patterns enable --group testing --dry-run   # preview without saving
 ```
 
 After any write command, the CLI reminds you to restart Hermes for changes to take effect.
@@ -446,9 +446,9 @@ After any write command, the CLI reminds you to restart Hermes for changes to ta
 ### `validate` — Check config syntax
 
 ```bash
-hermes custom-patterns validate                    # validate default config
-hermes custom-patterns validate --path /tmp/cfg.yaml  # validate a specific file
-hermes custom-patterns validate --quiet            # exit code only (CI/CD)
+hermes custom-dangerous-patterns validate                    # validate default config
+hermes custom-dangerous-patterns validate --path /tmp/cfg.yaml  # validate a specific file
+hermes custom-dangerous-patterns validate --quiet            # exit code only (CI/CD)
 ```
 
 Exit code 0 = valid, 1 = errors found, 2 = file not found.
@@ -458,17 +458,17 @@ Exit code 0 = valid, 1 = errors found, 2 = file not found.
 Shows config path, pattern counts by type, integrity status, protected patterns, and group breakdown.
 
 ```bash
-hermes custom-patterns info
+hermes custom-dangerous-patterns info
 ```
 
 ### `logs` — Extract plugin log entries
 
 ```bash
-hermes custom-patterns logs                          # all plugin log entries
-hermes custom-patterns logs --level WARNING          # filter by minimum level
-hermes custom-patterns logs --limit 20               # last 20 entries
-hermes custom-patterns logs --since 2026-06-01       # entries since a date
-hermes custom-patterns logs --follow                 # tail the log (Ctrl+C to exit)
+hermes custom-dangerous-patterns logs                          # all plugin log entries
+hermes custom-dangerous-patterns logs --level WARNING          # filter by minimum level
+hermes custom-dangerous-patterns logs --limit 20               # last 20 entries
+hermes custom-dangerous-patterns logs --since 2026-06-01       # entries since a date
+hermes custom-dangerous-patterns logs --follow                 # tail the log (Ctrl+C to exit)
 ```
 
 ### `add / remove` — Manage patterns
@@ -477,17 +477,17 @@ Interactive guided entry or CLI flags for scripting.
 
 ```bash
 # Interactive (guided prompts for each field)
-hermes custom-patterns add --interactive
-hermes custom-patterns remove --interactive
+hermes custom-dangerous-patterns add --interactive
+hermes custom-dangerous-patterns remove --interactive
 
 # Non-interactive (for scripting)
-hermes custom-patterns add --type block \
+hermes custom-dangerous-patterns add --type block \
     --pattern '\bheroku\s+(apps:destroy|pg:reset)\b' \
     --description 'Heroku destructive commands' \
     --group cloud
 
-hermes custom-patterns remove 13 --type block
-hermes custom-patterns remove "Heroku" --type block --dry-run
+hermes custom-dangerous-patterns remove 13 --type block
+hermes custom-dangerous-patterns remove "Heroku" --type block --dry-run
 ```
 
 ---
@@ -564,24 +564,24 @@ hermes plugins enable custom-dangerous-patterns
 
 1. Verify the plugin loaded and see active patterns:
    ```bash
-   hermes custom-patterns list
+   hermes custom-dangerous-patterns list
    ```
 
 2. Test a command against your patterns:
    ```bash
-   hermes custom-patterns test "vultr instance delete"
+   hermes custom-dangerous-patterns test "vultr instance delete"
    ```
 
 3. Check the plugin logs for errors:
    ```bash
-   hermes custom-patterns logs
+   hermes custom-dangerous-patterns logs
    ```
 
 4. Ensure you restarted Hermes after enabling the plugin or changing config.
 
 5. Validate your config syntax:
    ```bash
-   hermes custom-patterns validate
+   hermes custom-dangerous-patterns validate
    ```
 
 ### Allow patterns not working
@@ -589,7 +589,7 @@ hermes plugins enable custom-dangerous-patterns
 Allow patterns are checked **before** block patterns. If a command matches both, the allow wins. Test your pattern matching:
 
 ```bash
-hermes custom-patterns test "vultr account info" --verbose
+hermes custom-dangerous-patterns test "vultr account info" --verbose
 ```
 
 The `--verbose` output shows which patterns matched and the result.
@@ -598,14 +598,14 @@ The `--verbose` output shows which patterns matched and the result.
 
 If deny patterns are not blocking commands, verify:
 
-1. The pattern is enabled — `hermes custom-patterns list --enabled --type deny`
+1. The pattern is enabled — `hermes custom-dangerous-patterns list --enabled --type deny`
 2. No allow pattern is intercepting the command before the deny check (allow is checked after deny, so if both match, deny wins)
 3. Restart Hermes after config changes (mid-session edits are silently ignored)
 
 Test deny pattern matching:
 
 ```bash
-hermes custom-patterns test "git push --force origin main"
+hermes custom-dangerous-patterns test "git push --force origin main"
 ```
 
 ### Integrity warnings on startup
@@ -636,8 +636,8 @@ hermes-custom-dangerous-patterns-plugin/
 ├── __init__.py          # register(ctx) — injects patterns, monkey-patches detection
 ├── config.py            # YAML loading, validation, caching, integrity checks, save_config()
 ├── patterns.py          # Pattern compilation and matching (block, allow, deny)
-├── cli.py               # CLI command handlers (hermes custom-patterns ...)
-├── logs.py              # Log extraction and filtering for hermes custom-patterns logs
+├── cli.py               # CLI command handlers (hermes custom-dangerous-patterns ...)
+├── logs.py              # Log extraction and filtering for hermes custom-dangerous-patterns logs
 ├── AGENTS.md            # Developer guide: gotchas, testing safety, self-modification risks
 ├── examples/
 │   ├── custom-dangerous-patterns.yaml   # Example config with cloud/deployment patterns

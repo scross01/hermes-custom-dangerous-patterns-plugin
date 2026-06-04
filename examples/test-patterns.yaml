@@ -5,7 +5,7 @@
 # using real dangerous commands.
 #
 # All patterns use the [TEST] prefix and group: testing tag.
-# Enable via CLI: hermes custom-patterns enable --group testing
+# Enable via CLI: hermes custom-dangerous-patterns enable --group testing
 # Or: set enabled: true on individual patterns.
 
 patterns:

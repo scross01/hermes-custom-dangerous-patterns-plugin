@@ -108,8 +108,8 @@ The agent can read/write `~/.hermes/custom-dangerous-patterns.yaml`. It can add 
 **Preferred (v0.3.0+):** Use the CLI:
 
 ```bash
-hermes custom-patterns test "vultr instance list"
-hermes custom-patterns list
+hermes custom-dangerous-patterns test "vultr instance list"
+hermes custom-dangerous-patterns list
 ```
 
 **Fallback:** Verify pattern matching without restarting Hermes (from the plugin directory `~/.hermes/plugins/custom-dangerous-patterns/`):
@@ -138,15 +138,51 @@ print('Allow match:', is_allow_pattern('vultr instance list'))
 
 ## CLI architecture (v0.3.0)
 
-The plugin exposes a `hermes custom-patterns` CLI command group via Hermes's plugin CLI system (`ctx.register_cli_command()`). CLI commands run **outside** the Hermes agent runtime — they are standalone config management and introspection tools. No monkey-patching, no approval flow involvement.
+The plugin exposes a `hermes custom-dangerous-patterns` CLI command group via Hermes's plugin CLI system. CLI commands run **outside** the Hermes agent runtime — they are standalone config management and introspection tools. No monkey-patching, no approval flow involvement.
+
+### Registration flow
+
+Registration happens at Hermes startup via `__init__.py:_register_cli(ctx)`, which makes **one** call to `ctx.register_cli_command()` with the `setup_fn` parameter:
+
+```python
+# __init__.py
+import cli
+
+ctx.register_cli_command(
+    name="custom-dangerous-patterns",
+    help="Manage custom dangerous command patterns",
+    setup_fn=cli.register_cli,    # ← builds the argparse subcommand tree
+    handler_fn=None,
+    description="Add, list, test, enable, disable, and remove custom dangerous patterns...",
+)
+```
+
+Inside `register_cli(subparser)`, the argparse tree is built using `add_subparsers()` for each subcommand. Every subparser gets `set_defaults(func=_handle_*)` to wire dispatch:
+
+```python
+# cli.py — register_cli()
+subs = subparser.add_subparsers(dest="cdp_command")
+
+list_p = subs.add_parser("list", help="List custom patterns")
+list_p.add_argument("-t", "--type", choices=["block", "allow", "deny"], ...)
+list_p.set_defaults(func=_handle_list)
+
+test_p = subs.add_parser("test", help="Test a command against patterns")
+test_p.add_argument("command", help="Command string to test")
+test_p.add_argument("-v", "--verbose", action="store_true", ...)
+test_p.set_defaults(func=_handle_test)
+# … 8 more subcommands follow the same pattern
+```
+
+**Key detail:** The first arg to `ctx.register_cli_command()` is the `name` parameter, NOT the handler. The handler is passed indirectly via `setup_fn`, which receives the subparser and registers sub-subcommands with `set_defaults(func=...)`.
 
 ### Modules
 
 | Module | Role |
 |--------|------|
-| `cli.py` | All CLI command handlers (`cmd_list`, `cmd_test`, `cmd_init`, `cmd_enable`, `cmd_disable`, `cmd_validate`, `cmd_info`, `cmd_logs`, `cmd_add`, `cmd_remove`) |
+| `cli.py` | Defines `register_cli(subparser)` to build the argparse tree, plus all 10 `cmd_*` handlers and their `_handle_*` adapters |
 | `logs.py` | Log extraction and filtering from `~/.hermes/logs/hermes.log`. Supports level/date filtering, limit, and follow (tail) mode. |
-| `__init__.py` | Registers CLI commands via `_register_cli_commands(ctx)` during plugin startup |
+| `__init__.py` | Calls `ctx.register_cli_command(name=..., setup_fn=cli.register_cli)` during plugin startup |
 | `config.py` | Exposes `save_config()` for config write-back and `resolve_config_path()` for CLI path display |
 
 ### CLI vs Runtime
@@ -155,3 +191,10 @@ The plugin exposes a `hermes custom-patterns` CLI command group via Hermes's plu
 - Write commands (`enable`, `disable`, `add`, `remove`) modify the YAML config on disk and remind the user to restart Hermes.
 - The `test` command uses the same `patterns.py` matching functions as the runtime monkey-patches, guaranteeing consistent results.
 - CLI commands are invoked by Hermes's plugin CLI system but still use the same relative import convention as the rest of the plugin (`from .config import ...`, `from .patterns import ...`).
+
+### Adding a new subcommand
+
+1. Add the `cmd_*` handler in `cli.py` (returns `tuple[str, int]`)
+2. Add the `_handle_*` adapter in `cli.py` (calls `cmd_*`, calls `_emit()`)
+3. Add the subparser + arguments in `register_cli()` in `cli.py`
+4. No changes needed in `__init__.py` — the single `setup_fn` call already delegates everything to `register_cli()`

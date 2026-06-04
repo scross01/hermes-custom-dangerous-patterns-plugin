@@ -97,7 +97,7 @@ def register(ctx: Any) -> None:
         ctx.register_hook("pre_tool_call", _make_deny_hook(is_deny_pattern, is_allow_pattern))
 
     # 6. Register CLI subcommands (v0.3.0)
-    _register_cli_commands(ctx)
+    _register_cli(ctx)
 
     if not block_count and not allow_count and not deny_count:
         logger.info("custom-dangerous-patterns: no active patterns, plugin idle")
@@ -109,19 +109,29 @@ def register(ctx: Any) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _register_cli_commands(ctx: Any) -> None:
-    """Register hermes custom-patterns CLI subcommands.
+def _register_cli(ctx: Any) -> None:
+    """Register ``hermes custom-dangerous-patterns`` CLI command.
 
-    Called at plugin startup so CLI commands are available even when
-    no config exists (init needs to work before config is created).
+    Produces ``hermes custom-dangerous-patterns <subcommand>`` with
+    sub-subcommands: list, test, init, enable, disable, validate,
+    info, logs, add, remove.
+
+    The setup_fn (cli.register_cli) builds the argparse tree; each
+    subcommand dispatches to its _handle_* adapter in cli.py.
     """
     try:
         from . import cli
 
         ctx.register_cli_command(
-            "custom-patterns",
-            cli.register_subcommands,
+            name="custom-dangerous-patterns",
             help="Manage custom dangerous command patterns",
+            setup_fn=cli.register_cli,
+            handler_fn=None,
+            description=(
+                "Add, list, test, enable, disable, and remove custom "
+                "dangerous command patterns that integrate with Hermes's "
+                "built-in approval system."
+            ),
         )
     except Exception:
         logger.warning(

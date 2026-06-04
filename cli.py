@@ -1,65 +1,26 @@
-"""CLI command handlers for hermes custom-patterns (v0.3.0).
+"""CLI command handlers for hermes custom-dangerous-patterns (v0.3.0).
 
 Pure config management and introspection — no monkey-patching, no Hermes
 runtime dependencies. Each command handler is a standalone function that
 operates on config dicts and returns (output: str, exit_code: int).
 
-The register_subcommands() function is the entry point called by
-ctx.register_cli_command() in __init__.py.
+Commands are registered individually via ctx.register_cli_command() in
+__init__.py, producing:
+    hermes custom-dangerous-patterns list
+    hermes custom-dangerous-patterns test "..."
+    etc.
 """
 
 from __future__ import annotations
 
+import argparse
 import hashlib
 import os
 import re
 import sys
-from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
 from typing import Any
-
-# ---------------------------------------------------------------------------
-# CLI registration entry point
-# ---------------------------------------------------------------------------
-
-
-def register_subcommands(command_group: Any) -> None:
-    """Register all custom-patterns subcommands on the command group.
-
-    Called by ctx.register_cli_command() in __init__.py. The command_group
-    object provides add_command() or similar for registering subcommands.
-    We provide adapter functions that bridge between the command group's
-    argument parsing and our stateless handler functions.
-    """
-    # Each command is registered with a handler that parses args and
-    # calls the corresponding cmd_* function, then prints output and
-    # exits with the appropriate code.
-
-    _register(command_group, "list", _handle_list, help="List custom patterns")
-    _register(command_group, "test", _handle_test, help="Test a command against patterns")
-    _register(command_group, "init", _handle_init, help="Create a starter config")
-    _register(command_group, "enable", _handle_enable, help="Enable patterns")
-    _register(command_group, "disable", _handle_disable, help="Disable patterns")
-    _register(command_group, "validate", _handle_validate, help="Validate config syntax")
-    _register(command_group, "info", _handle_info, help="Show plugin state dashboard")
-    _register(command_group, "logs", _handle_logs, help="Show plugin log entries")
-    _register(command_group, "add", _handle_add, help="Add a custom pattern")
-    _register(command_group, "remove", _handle_remove, help="Remove a custom pattern")
-
-
-def _register(group: Any, name: str, handler: Callable, help: str) -> None:
-    """Register a subcommand on the command group.
-
-    Uses add_command() if available (argparse-like), otherwise falls back
-    to setattr for compatibility with different Hermes CLI backends.
-    """
-    add_cmd = getattr(group, "add_command", None)
-    if callable(add_cmd):
-        add_cmd(name, handler, help=help)
-    else:
-        setattr(group, name, handler)
-
 
 # ---------------------------------------------------------------------------
 # Command handlers — each returns (output: str, exit_code: int)
@@ -83,7 +44,7 @@ def cmd_list(
     if not config_path.exists():
         return (
             f"No config found at {config_path}.\n"
-            f"Run `hermes custom-patterns init` to create a starter config.\n",
+            f"Run `hermes custom-dangerous-patterns init` to create a starter config.\n",
             0,
         )
 
@@ -156,7 +117,7 @@ def cmd_list(
         else:
             lines.append(
                 "No custom patterns defined. "
-                "Edit your config file or use `hermes custom-patterns add`.\n"
+                "Edit your config file or use `hermes custom-dangerous-patterns add`.\n"
             )
 
     # Config path display
@@ -352,9 +313,9 @@ def cmd_init(
         f"{deny_count} deny patterns — all disabled)",
         "",
         "Next steps:",
-        "  1. Review the config: hermes custom-patterns list --disabled",
-        "  2. Enable patterns you want: hermes custom-patterns enable --group cloud",
-        '  3. Test your patterns: hermes custom-patterns test "vultr instance delete"',
+        "  1. Review the config: hermes custom-dangerous-patterns list --disabled",
+        "  2. Enable patterns you want: hermes custom-dangerous-patterns enable --group cloud",
+        '  3. Test your patterns: hermes custom-dangerous-patterns test "vultr instance delete"',
         "  4. Restart Hermes for changes to take effect",
     ]
     return ("\n".join(lines) + "\n", 0)
@@ -473,7 +434,7 @@ def _toggle_patterns(
     if not config_path.exists():
         return (
             f"No config found at {config_path}.\n"
-            f"Run `hermes custom-patterns init` to create a starter config.\n",
+            f"Run `hermes custom-dangerous-patterns init` to create a starter config.\n",
             1,
         )
 
@@ -666,7 +627,7 @@ def cmd_info() -> tuple[str, int]:
 
     if not config_path.exists():
         lines.append("Config: not found")
-        lines.append("Run `hermes custom-patterns init` to create a starter config.")
+        lines.append("Run `hermes custom-dangerous-patterns init` to create a starter config.")
         return ("\n".join(lines) + "\n", 0)
 
     path_display = get_config_path_display()
@@ -768,9 +729,18 @@ def cmd_logs(
 
     log_path = get_default_log_path()
 
-    if not log_path.is_file():
+    if not log_path.is_dir():
         return (
-            f"No Hermes log file found at {log_path}.\n"
+            f"Hermes log directory not found at {log_path}.\n"
+            f"Logs are only available when Hermes has been run at least once.\n",
+            1,
+        )
+
+    # Check for any *.log files
+    log_files = sorted(log_path.glob("*.log"))
+    if not log_files:
+        return (
+            f"No *.log files found in {log_path}.\n"
             f"Logs are only available when Hermes has been run at least once.\n",
             1,
         )
@@ -781,6 +751,10 @@ def cmd_logs(
 
     entries = extract_logs(log_path=log_path, level=level, limit=limit, since=since)
     lines = format_log_entries(entries, level=level)
+    # Add a note about which files were scanned
+    file_list = ", ".join(f.name for f in log_files)
+    lines.append("")
+    lines.append(f"Scanned: {len(log_files)} log file(s) — {file_list}")
     return ("\n".join(lines) + "\n", 0)
 
 
@@ -954,7 +928,7 @@ def cmd_remove(
     if not config_path.exists():
         return (
             f"No config found at {config_path}.\n"
-            f"Run `hermes custom-patterns init` to create a starter config.\n",
+            f"Run `hermes custom-dangerous-patterns init` to create a starter config.\n",
             1,
         )
 
@@ -1359,4 +1333,203 @@ def _config_update_reminder() -> str:
     )
 
 
+# ---------------------------------------------------------------------------
+# CLI registration — called by __init__.py via ctx.register_cli_command()
+# ---------------------------------------------------------------------------
+
+
+def register_cli(subparser: argparse.ArgumentParser) -> None:
+    """Build the ``hermes custom-dangerous-patterns`` argparse tree.
+
+    Called by __init__.py at plugin load time via ctx.register_cli_command().
+    Sets up sub-subcommands: list, test, init, enable, disable, validate,
+    info, logs, add, remove.
+    """
+    subs = subparser.add_subparsers(dest="cdp_command")
+
+    # -- list --
+    list_p = subs.add_parser("list", help="List custom patterns")
+    list_p.add_argument(
+        "-t", "--type", dest="type",
+        choices=["block", "allow", "deny"],
+        help="Filter by pattern type",
+    )
+    list_p.add_argument("-g", "--group", help="Filter by group name")
+    list_p.add_argument("-s", "--search", help="Search in description/pattern")
+    list_p.add_argument(
+        "--disabled", action="store_true", help="Show only disabled patterns"
+    )
+    list_p.add_argument(
+        "--enabled", action="store_true", help="Show only enabled patterns"
+    )
+    list_p.add_argument(
+        "--builtins", action="store_true",
+        help="Also show Hermes built-in patterns",
+    )
+    list_p.set_defaults(func=_handle_list)
+
+    # -- test --
+    test_p = subs.add_parser(
+        "test", help="Test a command against all pattern types"
+    )
+    test_p.add_argument("command", help="Command string to test")
+    test_p.add_argument(
+        "-v", "--verbose", action="store_true",
+        help="Show matched regex patterns",
+    )
+    test_p.add_argument(
+        "--skip-builtins", action="store_true",
+        help="Skip built-in Hermes patterns",
+    )
+    test_p.set_defaults(func=_handle_test)
+
+    # -- init --
+    init_p = subs.add_parser(
+        "init", help="Create a starter config file"
+    )
+    init_p.add_argument(
+        "--with-examples", action="store_true",
+        help="Include fully-enabled example patterns",
+    )
+    init_p.add_argument(
+        "-f", "--force", action="store_true",
+        help="Overwrite existing config",
+    )
+    init_p.set_defaults(func=_handle_init)
+
+    # -- enable --
+    enable_p = subs.add_parser("enable", help="Enable patterns")
+    enable_p.add_argument(
+        "target", nargs="?", default=None,
+        help="Pattern index or description substring",
+    )
+    enable_p.add_argument(
+        "-t", "--type", dest="type",
+        choices=["block", "allow", "deny"],
+        help="Filter by pattern type",
+    )
+    enable_p.add_argument("-g", "--group", help="Enable all patterns in group")
+    enable_p.add_argument(
+        "--dry-run", action="store_true",
+        help="Show what would change without saving",
+    )
+    enable_p.set_defaults(func=_handle_enable)
+
+    # -- disable --
+    disable_p = subs.add_parser("disable", help="Disable patterns")
+    disable_p.add_argument(
+        "target", nargs="?", default=None,
+        help="Pattern index or description substring",
+    )
+    disable_p.add_argument(
+        "-t", "--type", dest="type",
+        choices=["block", "allow", "deny"],
+        help="Filter by pattern type",
+    )
+    disable_p.add_argument("-g", "--group", help="Disable all patterns in group")
+    disable_p.add_argument(
+        "--dry-run", action="store_true",
+        help="Show what would change without saving",
+    )
+    disable_p.set_defaults(func=_handle_disable)
+
+    # -- validate --
+    validate_p = subs.add_parser(
+        "validate", help="Validate config syntax and regexes"
+    )
+    validate_p.add_argument(
+        "path", nargs="?", default=None,
+        help="Config path (default: auto-detect)",
+    )
+    validate_p.add_argument(
+        "-q", "--quiet", action="store_true",
+        help="Exit code only, no output",
+    )
+    validate_p.set_defaults(func=_handle_validate)
+
+    # -- info --
+    info_p = subs.add_parser("info", help="Show plugin state dashboard")
+    info_p.set_defaults(func=_handle_info)
+
+    # -- logs --
+    logs_p = subs.add_parser(
+        "logs", help="Show plugin log entries"
+    )
+    logs_p.add_argument(
+        "-l", "--level",
+        choices=["DEBUG", "INFO", "WARNING", "ERROR"],
+        help="Filter by log level",
+    )
+    logs_p.add_argument(
+        "-n", "--limit", type=int, default=100,
+        help="Max entries to show (default: 100)",
+    )
+    logs_p.add_argument(
+        "--since", default=None,
+        help="Show entries since timestamp (e.g. '2h', '30m')",
+    )
+    logs_p.add_argument(
+        "-f", "--follow", action="store_true",
+        help="Follow log file (tail -f)",
+    )
+    logs_p.set_defaults(func=_handle_logs)
+
+    # -- add --
+    add_p = subs.add_parser("add", help="Add a custom pattern")
+    add_p.add_argument(
+        "-i", "--interactive", action="store_true",
+        help="Guided interactive entry",
+    )
+    add_p.add_argument(
+        "-t", "--type", dest="type",
+        choices=["block", "allow", "deny"],
+        help="Pattern type (required in non-interactive mode)",
+    )
+    add_p.add_argument(
+        "-p", "--pattern", default=None,
+        help="Regex pattern (required in non-interactive mode)",
+    )
+    add_p.add_argument(
+        "-d", "--description", default=None,
+        help="Description (required in non-interactive mode)",
+    )
+    add_p.add_argument("-g", "--group", default=None, help="Group name")
+    add_p.add_argument(
+        "--examples", nargs="+", default=None,
+        help="Example commands that match this pattern",
+    )
+    add_p.add_argument(
+        "--disabled", action="store_true",
+        help="Add pattern as disabled (default: enabled)",
+    )
+    add_p.add_argument(
+        "--protected", action="store_true",
+        help="Protect pattern from enable/disable/remove",
+    )
+    add_p.add_argument(
+        "--dry-run", action="store_true",
+        help="Show what would be added without saving",
+    )
+    add_p.set_defaults(func=_handle_add)
+
+    # -- remove --
+    remove_p = subs.add_parser("remove", help="Remove a custom pattern")
+    remove_p.add_argument(
+        "target", nargs="?", default=None,
+        help="Pattern index or description substring",
+    )
+    remove_p.add_argument(
+        "-i", "--interactive", action="store_true",
+        help="Interactive selection",
+    )
+    remove_p.add_argument(
+        "-t", "--type", dest="type",
+        choices=["block", "allow", "deny"],
+        help="Filter by pattern type",
+    )
+    remove_p.add_argument(
+        "--dry-run", action="store_true",
+        help="Show what would be removed without saving",
+    )
+    remove_p.set_defaults(func=_handle_remove)
 

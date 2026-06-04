@@ -1,7 +1,7 @@
 """Log extraction and filtering for the custom-dangerous-patterns plugin (v0.3.0).
 
-Extracts plugin-specific log entries from the Hermes log file at
-~/.hermes/logs/hermes.log. Supports level filtering, date filtering,
+Extracts plugin-specific log entries from all *.log files under
+~/.hermes/logs/. Supports level filtering, date filtering,
 limit, and follow (tail -f) mode.
 """
 
@@ -12,8 +12,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-# Default Hermes log location
-_DEFAULT_LOG_PATH = Path.home() / ".hermes" / "logs" / "hermes.log"
+# Default Hermes log directory (contains agent.log, errors.log, gateway.log, etc.)
+_DEFAULT_LOG_PATH = Path.home() / ".hermes" / "logs"
 
 # Pattern to identify plugin-specific log entries.
 # Matches the logger format used by the plugin: logger.info("custom-dangerous-patterns: ...")
@@ -30,10 +30,13 @@ def extract_logs(
     limit: int = 100,
     since: str | None = None,
 ) -> list[dict[str, Any]]:
-    """Extract plugin-specific log entries from the Hermes log file.
+    """Extract plugin-specific log entries from all *.log files in the Hermes log directory.
+
+    Scans all *.log files under the Hermes log directory (not subdirectories).
+    Most recently modified files are scanned first.
 
     Args:
-        log_path: Path to the Hermes log file. Defaults to ~/.hermes/logs/hermes.log.
+        log_path: Path to the Hermes log directory. Defaults to ~/.hermes/logs.
         level: Minimum log level filter (e.g., "WARNING", "ERROR", "CRITICAL").
         limit: Maximum number of entries to return (most recent first).
         since: Date string (YYYY-MM-DD) for entries after this date.
@@ -44,7 +47,7 @@ def extract_logs(
     if log_path is None:
         log_path = _DEFAULT_LOG_PATH
 
-    if not log_path.is_file():
+    if not log_path.is_dir():
         return []
 
     entries: list[dict[str, Any]] = []
@@ -53,61 +56,85 @@ def extract_logs(
     _level_rank = {"DEBUG": 0, "INFO": 1, "WARNING": 2, "ERROR": 3, "CRITICAL": 4}
     min_rank = _level_rank.get(level.upper(), 0) if level else 0
 
-    try:
-        with open(log_path, encoding="utf-8") as f:
-            for line in f:
-                m = _PLUGIN_LOG_PATTERN.search(line)
-                if not m:
-                    continue
+    # Collect all *.log files, sorted by mtime ascending (oldest first)
+    # so entries accumulate chronologically; entries[-limit:][::-1]
+    # then correctly returns the most recent entries at the end.
+    log_files = sorted(
+        [f for f in log_path.glob("*.log") if f.is_file()],
+        key=lambda p: p.stat().st_mtime,
+    )
 
-                ts_str = m.group("timestamp")
-                entry_level = m.group("level")
-                message = m.group("message")
+    for log_file in log_files:
+        try:
+            with open(log_file, encoding="utf-8", errors="replace") as f:
+                for line in f:
+                    m = _PLUGIN_LOG_PATTERN.search(line)
+                    if not m:
+                        continue
 
-                # Level filter
-                entry_rank = _level_rank.get(entry_level, 0)
-                if entry_rank < min_rank:
-                    continue
+                    ts_str = m.group("timestamp")
+                    entry_level = m.group("level")
+                    message = m.group("message")
 
-                # Date filter
-                if since_dt is not None:
-                    try:
-                        entry_dt = datetime.strptime(
-                            ts_str.strip(), "%Y-%m-%d %H:%M:%S"
-                        )
-                        if entry_dt < since_dt:
-                            continue
-                    except ValueError:
-                        pass
+                    # Level filter
+                    entry_rank = _level_rank.get(entry_level, 0)
+                    if entry_rank < min_rank:
+                        continue
 
-                entries.append({
-                    "timestamp": ts_str.strip(),
-                    "level": entry_level,
-                    "message": message,
-                })
-    except OSError:
-        return []
+                    # Date filter
+                    if since_dt is not None:
+                        try:
+                            entry_dt = datetime.strptime(
+                                ts_str.strip(), "%Y-%m-%d %H:%M:%S"
+                            )
+                            if entry_dt < since_dt:
+                                continue
+                        except ValueError:
+                            pass
+
+                    entries.append({
+                        "timestamp": ts_str.strip(),
+                        "level": entry_level,
+                        "message": message,
+                    })
+        except OSError:
+            continue
 
     # Return most recent first, limited
     return entries[-limit:][::-1]
 
 
 def follow_logs(log_path: Path | None = None) -> None:
-    """Tail the Hermes log file and print plugin entries in real time.
+    """Tail the most recent Hermes log file and print plugin entries in real time.
 
-    Blocks until interrupted (Ctrl+C). Intended for use from the CLI.
+    Blocks until interrupted (Ctrl+C). Follows the most recently modified
+    *.log file in the Hermes log directory. Intended for use from the CLI.
     """
     import time
 
     if log_path is None:
         log_path = _DEFAULT_LOG_PATH
 
-    if not log_path.is_file():
-        print(f"No Hermes log file found at {log_path}")
+    if not log_path.is_dir():
+        print(f"Hermes log directory not found at {log_path}")
         return
 
+    # Find the most recently modified *.log file
+    log_files = sorted(
+        [f for f in log_path.glob("*.log") if f.is_file()],
+        key=lambda p: p.stat().st_mtime,
+        reverse=True,
+    )
+
+    if not log_files:
+        print(f"No *.log files found in {log_path}")
+        return
+
+    target = log_files[0]
+    print(f"Following: {target.name} (Ctrl+C to stop)")
+
     try:
-        with open(log_path, encoding="utf-8") as f:
+        with open(target, encoding="utf-8", errors="replace") as f:
             f.seek(0, 2)  # Move to end of file
             while True:
                 line = f.readline()
@@ -151,5 +178,5 @@ def _parse_since(date_str: str) -> datetime:
 
 
 def get_default_log_path() -> Path:
-    """Return the default path to the Hermes log file."""
+    """Return the default path to the Hermes log directory (~/.hermes/logs/)."""
     return _DEFAULT_LOG_PATH
