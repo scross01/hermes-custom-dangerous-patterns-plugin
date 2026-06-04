@@ -222,8 +222,18 @@ def test_cmd_list_filter_by_group(monkeypatch, cli_module, tmp_path):
         "load_config",
         lambda force=False, integrity_check=True: {
             "patterns": [
-                {"pattern": r"\bvultr\b", "description": "Vultr", "group": "cloud", "enabled": True},
-                {"pattern": r"\baws\b", "description": "AWS", "group": "iac", "enabled": True},
+                {
+                    "pattern": r"\bvultr\b",
+                    "description": "Vultr",
+                    "group": "cloud",
+                    "enabled": True,
+                },
+                {
+                    "pattern": r"\baws\b",
+                    "description": "AWS",
+                    "group": "iac",
+                    "enabled": True,
+                },
             ],
             "allow_patterns": [],
             "deny_patterns": [],

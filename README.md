@@ -72,6 +72,16 @@ hermes plugins enable custom-dangerous-patterns
 
 ### Step 2: Create the config file
 
+Easiest — use the interactive bootstrap:
+
+```bash
+hermes custom-patterns init --with-examples
+```
+
+This creates `~/.hermes/custom-dangerous-patterns.yaml` with example patterns (all enabled for demonstration). Without `--with-examples`, creates a minimal config with safe test patterns (all disabled).
+
+Or manually:
+
 ```bash
 cp ~/.hermes/plugins/custom-dangerous-patterns/examples/custom-dangerous-patterns.yaml \
    ~/.hermes/custom-dangerous-patterns.yaml
@@ -89,6 +99,14 @@ hermes gateway restart    # if using the gateway
 ```
 
 ### Step 4: Test it
+
+Test your patterns without running real commands:
+
+```bash
+hermes custom-patterns test "vultr instance delete --instance-id cb670a12"
+```
+
+Then try it live:
 
 ```
 > vultr instance delete --instance-id cb670a12-e4f5-6d78-ab90-1234567890ab
@@ -369,6 +387,111 @@ allow_patterns:
     description: 'Shell completion scripts are safe'
 ```
 
+## CLI Reference (v0.3.0)
+
+All commands follow the `hermes custom-patterns <verb>` pattern, consistent with other Hermes subcommands like `hermes plugins`.
+
+### `list` — Show your patterns
+
+```bash
+hermes custom-patterns list                    # all patterns
+hermes custom-patterns list --type block       # block patterns only
+hermes custom-patterns list --type allow       # allow patterns only
+hermes custom-patterns list --type deny        # deny patterns only
+hermes custom-patterns list --group cloud      # patterns in a group
+hermes custom-patterns list --disabled         # only disabled patterns
+hermes custom-patterns list --enabled          # only active patterns
+hermes custom-patterns list --search aws       # search descriptions and patterns
+hermes custom-patterns list --builtins         # include Hermes built-in patterns (snapshot)
+```
+
+> **Note:** `--builtins` uses a static snapshot of Hermes's built-in patterns
+> bundled at plugin install time. These may drift from Hermes core updates.
+
+### `test <command>` — Verify patterns before running
+
+Test a command against all patterns to see what would happen **without running it**.
+
+```bash
+hermes custom-patterns test "vultr instance delete"
+hermes custom-patterns test "vultr account info" --verbose
+hermes custom-patterns test "git push --force" --skip-builtins
+```
+
+Shows which patterns match and the result: **DENY** (blocked immediately), **ALLOW** (runs freely), **APPROVAL PROMPT** (interactive prompt), or **PASS** (no patterns matched).
+
+`--verbose` shows full pattern regex and built-in matches. `--skip-builtins` omits Hermes's ~47 built-in patterns to focus on custom patterns.
+
+### `init` — First-run bootstrap
+
+```bash
+hermes custom-patterns init                    # minimal config with safe [TEST] patterns (all disabled)
+hermes custom-patterns init --with-examples    # full example config (all enabled for demonstration)
+hermes custom-patterns init --force            # overwrite existing config without prompting
+```
+
+### `enable / disable` — Toggle patterns
+
+Toggle patterns on/off without editing YAML. Target by index, description substring, or group.
+
+```bash
+hermes custom-patterns enable 1                          # by index (from list output)
+hermes custom-patterns disable "Vultr"                    # by description substring
+hermes custom-patterns enable --group cloud               # all patterns in a group
+hermes custom-patterns enable --group testing --dry-run   # preview without saving
+```
+
+After any write command, the CLI reminds you to restart Hermes for changes to take effect.
+
+### `validate` — Check config syntax
+
+```bash
+hermes custom-patterns validate                    # validate default config
+hermes custom-patterns validate --path /tmp/cfg.yaml  # validate a specific file
+hermes custom-patterns validate --quiet            # exit code only (CI/CD)
+```
+
+Exit code 0 = valid, 1 = errors found, 2 = file not found.
+
+### `info` — State dashboard
+
+Shows config path, pattern counts by type, integrity status, protected patterns, and group breakdown.
+
+```bash
+hermes custom-patterns info
+```
+
+### `logs` — Extract plugin log entries
+
+```bash
+hermes custom-patterns logs                          # all plugin log entries
+hermes custom-patterns logs --level WARNING          # filter by minimum level
+hermes custom-patterns logs --limit 20               # last 20 entries
+hermes custom-patterns logs --since 2026-06-01       # entries since a date
+hermes custom-patterns logs --follow                 # tail the log (Ctrl+C to exit)
+```
+
+### `add / remove` — Manage patterns
+
+Interactive guided entry or CLI flags for scripting.
+
+```bash
+# Interactive (guided prompts for each field)
+hermes custom-patterns add --interactive
+hermes custom-patterns remove --interactive
+
+# Non-interactive (for scripting)
+hermes custom-patterns add --type block \
+    --pattern '\bheroku\s+(apps:destroy|pg:reset)\b' \
+    --description 'Heroku destructive commands' \
+    --group cloud
+
+hermes custom-patterns remove 13 --type block
+hermes custom-patterns remove "Heroku" --type block --dry-run
+```
+
+---
+
 ## How It Works
 
 The plugin injects your custom patterns into Hermes's `DANGEROUS_PATTERNS` list at startup via pattern injection + two monkey-patches:
@@ -439,69 +562,50 @@ hermes plugins enable custom-dangerous-patterns
 
 ### Patterns not triggering approval
 
-1. Verify the plugin loaded successfully:
+1. Verify the plugin loaded and see active patterns:
    ```bash
-   grep "custom-dangerous-patterns" ~/.hermes/logs/agent.log | tail -5
+   hermes custom-patterns list
    ```
 
-2. Check for import errors:
+2. Test a command against your patterns:
    ```bash
-   grep "Failed to load plugin.*custom-dangerous-patterns" ~/.hermes/logs/errors.log
+   hermes custom-patterns test "vultr instance delete"
    ```
 
-3. Ensure you restarted Hermes after enabling the plugin.
-
-4. Test pattern matching directly:
+3. Check the plugin logs for errors:
    ```bash
-   cd ~/.hermes/plugins/custom-dangerous-patterns
-   python3 -c "
-   from .config import load_config
-   from .patterns import compile_all, get_block_patterns
-   config = load_config(force=True)
-   compile_all(config)
-   patterns = get_block_patterns()
-   print(f'{len(patterns)} block patterns loaded')
-   for regex, desc in patterns:
-       print(f'  {regex.pattern} — {desc}')
-   "
+   hermes custom-patterns logs
+   ```
+
+4. Ensure you restarted Hermes after enabling the plugin or changing config.
+
+5. Validate your config syntax:
+   ```bash
+   hermes custom-patterns validate
    ```
 
 ### Allow patterns not working
 
-Allow patterns are checked **before** block patterns. If a command matches both, the allow wins. Verify your allow pattern matches the exact command string:
+Allow patterns are checked **before** block patterns. If a command matches both, the allow wins. Test your pattern matching:
 
 ```bash
-cd ~/.hermes/plugins/custom-dangerous-patterns
-python3 -c "
-from .config import load_config
-from .patterns import compile_all, is_allow_pattern
-config = load_config(force=True)
-compile_all(config)
-result = is_allow_pattern('vultr account info')
-print(f'Match: {result}')  # Should print the description
-"
+hermes custom-patterns test "vultr account info" --verbose
 ```
+
+The `--verbose` output shows which patterns matched and the result.
 
 ### Deny patterns not blocking
 
 If deny patterns are not blocking commands, verify:
 
-1. The pattern is enabled (remove `enabled: false` or set it to `true`)
+1. The pattern is enabled — `hermes custom-patterns list --enabled --type deny`
 2. No allow pattern is intercepting the command before the deny check (allow is checked after deny, so if both match, deny wins)
 3. Restart Hermes after config changes (mid-session edits are silently ignored)
 
 Test deny pattern matching:
 
 ```bash
-cd ~/.hermes/plugins/custom-dangerous-patterns
-python3 -c "
-from .config import load_config
-from .patterns import compile_all, is_deny_pattern
-config = load_config(force=True)
-compile_all(config)
-result = is_deny_pattern('git push --force origin main')
-print(f'Deny match: {result}')
-"
+hermes custom-patterns test "git push --force origin main"
 ```
 
 ### Integrity warnings on startup
@@ -530,8 +634,10 @@ The path can point to a directory of `*.yaml` files (see [Directory Config Loadi
 hermes-custom-dangerous-patterns-plugin/
 ├── plugin.yaml          # Hermes plugin manifest
 ├── __init__.py          # register(ctx) — injects patterns, monkey-patches detection
-├── config.py            # YAML loading, validation, caching, integrity checks
+├── config.py            # YAML loading, validation, caching, integrity checks, save_config()
 ├── patterns.py          # Pattern compilation and matching (block, allow, deny)
+├── cli.py               # CLI command handlers (hermes custom-patterns ...)
+├── logs.py              # Log extraction and filtering for hermes custom-patterns logs
 ├── AGENTS.md            # Developer guide: gotchas, testing safety, self-modification risks
 ├── examples/
 │   ├── custom-dangerous-patterns.yaml   # Example config with cloud/deployment patterns
@@ -540,7 +646,8 @@ hermes-custom-dangerous-patterns-plugin/
 │   ├── conftest.py       # Test fixtures, mocks, helpers
 │   ├── test_config.py    # Config loading, validation, integrity tests
 │   ├── test_patterns.py  # Pattern compilation and matching tests
-│   └── test_init.py      # Plugin registration and monkey-patch tests
+│   ├── test_init.py      # Plugin registration and monkey-patch tests
+│   └── test_cli.py       # CLI command handler tests (v0.3.0)
 ├── README.md            # This file
 ├── LICENSE              # MIT
 └── .gitignore
@@ -550,7 +657,7 @@ hermes-custom-dangerous-patterns-plugin/
 
 - Python 3.11+
 - [Hermes Agent](https://github.com/NousResearch/hermes-agent) (tested with 0.15.1)
-- PyYAML — for config loading (ships with Hermes Agent; also available via `uv pip install pyyaml`)
+- ruamel.yaml — for config loading and write-back (declared in `plugin.yaml`; Hermes installs it automatically)
 
 ### Development
 

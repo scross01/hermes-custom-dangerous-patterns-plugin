@@ -121,9 +121,10 @@ def test_register_no_block_no_injection(
     monkeypatch, tmp_path, init_register
 ):
     """register() without block patterns does not inject."""
+    allow_cfg = [{"pattern": r"\bvultr\b", "description": "Vultr"}]
     monkeypatch.setattr(
         init_register.config, "load_config",
-        lambda: {"patterns": [], "allow_patterns": [{"pattern": r"\bvultr\b", "description": "Vultr"}]},
+        lambda: {"patterns": [], "allow_patterns": allow_cfg},
     )
 
     approval = _install_tools_approval(monkeypatch)
@@ -256,7 +257,7 @@ def test_deny_handler_fallback_composes_with_allow(monkeypatch):
     approval = _install_tools_approval(monkeypatch)
 
     # Phase 1: patch allow patterns (simulating register step 3)
-    from __init__ import _patch_detect_function, _patch_deny_handler
+    from __init__ import _patch_deny_handler, _patch_detect_function
 
     def allow_checker(cmd):
         return "Allowed" if "safe" in cmd else None
@@ -312,6 +313,7 @@ def test_register_with_deny_patterns(
 def test_patterns_overlap_broad():
     """Broad patterns like '.*' shadow everything."""
     import re
+
     from __init__ import _patterns_overlap
 
     r1 = re.compile(".*")
@@ -322,6 +324,7 @@ def test_patterns_overlap_broad():
 def test_patterns_overlap_token_match():
     """Patterns with shared tokens overlap."""
     import re
+
     from __init__ import _patterns_overlap
 
     r1 = re.compile(r"\baws\b.*")
@@ -332,6 +335,7 @@ def test_patterns_overlap_token_match():
 def test_patterns_overlap_no_match():
     """Unrelated patterns don't overlap."""
     import re
+
     from __init__ import _patterns_overlap
 
     r1 = re.compile(r"\bvultr\b")

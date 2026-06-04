@@ -105,7 +105,14 @@ The agent can read/write `~/.hermes/custom-dangerous-patterns.yaml`. It can add 
 
 ## Ad-hoc pattern testing
 
-Verify pattern matching without restarting Hermes:
+**Preferred (v0.3.0+):** Use the CLI:
+
+```bash
+hermes custom-patterns test "vultr instance list"
+hermes custom-patterns list
+```
+
+**Fallback:** Verify pattern matching without restarting Hermes (from the plugin directory `~/.hermes/plugins/custom-dangerous-patterns/`):
 
 ```bash
 python3 -c "
@@ -118,15 +125,33 @@ print('Allow match:', is_allow_pattern('vultr instance list'))
 "
 ```
 
-Run from the plugin directory (`~/.hermes/plugins/custom-dangerous-patterns/`).
-
 ## Runtime dependencies
 
 - Python 3.9+
-- PyYAML (`pip install pyyaml`)
+- ruamel.yaml (declared in `plugin.yaml`; Hermes installs automatically)
 - Hermes Agent
 
 ## Config path resolution
 
 1. `$HERMES_CUSTOM_PATTERNS_PATH` env var
 2. `~/.hermes/custom-dangerous-patterns.yaml`
+
+## CLI architecture (v0.3.0)
+
+The plugin exposes a `hermes custom-patterns` CLI command group via Hermes's plugin CLI system (`ctx.register_cli_command()`). CLI commands run **outside** the Hermes agent runtime — they are standalone config management and introspection tools. No monkey-patching, no approval flow involvement.
+
+### Modules
+
+| Module | Role |
+|--------|------|
+| `cli.py` | All CLI command handlers (`cmd_list`, `cmd_test`, `cmd_init`, `cmd_enable`, `cmd_disable`, `cmd_validate`, `cmd_info`, `cmd_logs`, `cmd_add`, `cmd_remove`) |
+| `logs.py` | Log extraction and filtering from `~/.hermes/logs/hermes.log`. Supports level/date filtering, limit, and follow (tail) mode. |
+| `__init__.py` | Registers CLI commands via `_register_cli_commands(ctx)` during plugin startup |
+| `config.py` | Exposes `save_config()` for config write-back and `resolve_config_path()` for CLI path display |
+
+### CLI vs Runtime
+
+- CLI commands load config fresh each invocation (`load_config(force=True, integrity_check=False)`). They bypass the module-level cache.
+- Write commands (`enable`, `disable`, `add`, `remove`) modify the YAML config on disk and remind the user to restart Hermes.
+- The `test` command uses the same `patterns.py` matching functions as the runtime monkey-patches, guaranteeing consistent results.
+- CLI commands are invoked by Hermes's plugin CLI system but still use the same relative import convention as the rest of the plugin (`from .config import ...`, `from .patterns import ...`).

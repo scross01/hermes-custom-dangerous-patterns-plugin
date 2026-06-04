@@ -10,9 +10,12 @@ ctx.register_cli_command() in __init__.py.
 
 from __future__ import annotations
 
+import hashlib
+import os
 import re
 import sys
 from collections.abc import Callable
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -673,10 +676,6 @@ def cmd_info() -> tuple[str, int]:
     hash_path = _resolve_hash_path(config_path)
     if hash_path.is_file():
         try:
-            import hashlib
-            import os
-            from datetime import datetime
-
             previous = _load_hash_data(hash_path)
             prev_hash = previous.get("config_hash")
             if prev_hash and config_path.is_file():

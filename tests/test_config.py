@@ -12,7 +12,7 @@ import pytest
 
 def test_resolve_default_path_no_hermes_constants():
     """Fallback to ~/.hermes/ when hermes_constants is not importable."""
-    mods = {k: v for k, v in sys.modules.items() if k != "hermes_constants"}
+    _mods = {k: v for k, v in sys.modules.items() if k != "hermes_constants"}
     with pytest.MonkeyPatch.context() as mp:
         mp.setitem(sys.modules, "hermes_constants", {})
         mp.delitem(sys.modules, "hermes_constants", raising=False)
@@ -280,7 +280,9 @@ def test_load_config_missing_defaults(reset_config_cache, mock_hermes_constants)
     assert result == {"patterns": [], "allow_patterns": [], "deny_patterns": []}
 
 
-def test_load_config_with_valid_config(reset_config_cache, config_with_content, mock_hermes_constants):
+def test_load_config_with_valid_config(
+    reset_config_cache, config_with_content, mock_hermes_constants,
+):
     """Valid config returns loaded patterns."""
     from config import load_config
 
@@ -293,16 +295,16 @@ def test_load_config_caching(reset_config_cache, mock_hermes_constants, config_w
     """Second call without force=True returns cached result."""
     from config import load_config
 
-    first = load_config()
+    _first = load_config()
     second = load_config()
-    assert second is first
+    assert second is _first
 
 
 def test_load_config_force_true(reset_config_cache, mock_hermes_constants, config_with_content):
     """force=True bypasses cache."""
     from config import load_config
 
-    first = load_config()
+    _first = load_config()
 
     import config as cfg
 
@@ -339,6 +341,7 @@ patterns:
 def test_resolve_hash_path():
     """Hash file is alongside config in the same directory."""
     from pathlib import Path
+
     from config import _resolve_hash_path
 
     config_path = Path("/home/user/.hermes/custom-dangerous-patterns.yaml")
@@ -378,7 +381,7 @@ def test_load_hash_data_valid(tmp_path):
 
 def test_save_and_load_hash_data_roundtrip(tmp_path):
     """Saved hash data can be loaded back."""
-    from config import _save_hash_data, _load_hash_data
+    from config import _load_hash_data, _save_hash_data
 
     hash_path = tmp_path / "hash.json"
     data = {"config_hash": "def456", "protected": {"key": "hash"}}
@@ -404,6 +407,7 @@ def test_check_protected_patterns_missing(caplog):
 def test_check_protected_patterns_modified(caplog):
     """Modified protected pattern regex logs CRITICAL."""
     import hashlib
+
     from config import _check_protected_patterns
 
     validated = {
@@ -419,7 +423,7 @@ def test_check_protected_patterns_modified(caplog):
     previous = {
         "protected": {
             "Critical Pattern": hashlib.sha256(
-                r"\bOldPattern\b".encode("utf-8")
+                br"\bOldPattern\b"
             ).hexdigest()
         }
     }
@@ -433,6 +437,7 @@ def test_check_protected_patterns_modified(caplog):
 def test_check_protected_patterns_unchanged(caplog):
     """Unchanged protected pattern logs nothing."""
     import hashlib
+
     from config import _check_protected_patterns
 
     validated = {
@@ -447,7 +452,7 @@ def test_check_protected_patterns_unchanged(caplog):
     }
     previous = {
         "protected": {
-            "Vultr CLI": hashlib.sha256(r"\bvultr\b".encode("utf-8")).hexdigest()
+            "Vultr CLI": hashlib.sha256(br"\bvultr\b").hexdigest()
         }
     }
 
@@ -481,6 +486,7 @@ def test_check_protected_patterns_no_previous(caplog):
 def test_check_config_integrity_hash_changed(caplog, tmp_path):
     """Changed config hash logs WARNING on second run."""
     import json
+
     from config import _check_config_integrity
 
     config_path = tmp_path / "config.yaml"
@@ -489,10 +495,11 @@ def test_check_config_integrity_hash_changed(caplog, tmp_path):
     validated = {"patterns": [{}], "allow_patterns": [], "deny_patterns": []}
 
     # Simulate a previous session with a different config hash
-    hash_path.write_text(
-        json.dumps({"config_hash": "0000111122223333", "pattern_counts": {"patterns": 0, "allow_patterns": 0, "deny_patterns": 0}}),
-        encoding="utf-8",
-    )
+    hash_data = {
+        "config_hash": "0000111122223333",
+        "pattern_counts": {"patterns": 0, "allow_patterns": 0, "deny_patterns": 0},
+    }
+    hash_path.write_text(json.dumps(hash_data), encoding="utf-8")
 
     with caplog.at_level("WARNING"):
         _check_config_integrity(config_path, raw_text, validated, True)
@@ -528,7 +535,9 @@ def test_check_config_integrity_disabled(caplog, tmp_path):
     assert not caplog.records
 
 
-def test_load_config_with_integrity_check(reset_config_cache, config_with_content, mock_hermes_constants):
+def test_load_config_with_integrity_check(
+    reset_config_cache, config_with_content, mock_hermes_constants,
+):
     """load_config runs integrity checks by default."""
     from config import load_config
 
