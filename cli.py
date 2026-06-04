@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import sys
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
 # ---------------------------------------------------------------------------
@@ -441,8 +442,8 @@ def cmd_enable(
     dry_run: bool = False,
 ) -> tuple[str, int]:
     """Enable patterns by index, description, or group."""
-    # Stub — implemented in Chunk 6
-    return ("enable: not yet implemented\n", 1)
+    return _toggle_patterns(enable=True, target=target, pattern_type=pattern_type,
+                            group=group, dry_run=dry_run)
 
 
 def cmd_disable(
@@ -452,8 +453,121 @@ def cmd_disable(
     dry_run: bool = False,
 ) -> tuple[str, int]:
     """Disable patterns by index, description, or group."""
-    # Stub — implemented in Chunk 6
-    return ("disable: not yet implemented\n", 1)
+    return _toggle_patterns(enable=False, target=target, pattern_type=pattern_type,
+                            group=group, dry_run=dry_run)
+
+
+def _toggle_patterns(
+    enable: bool,
+    target: str | None,
+    pattern_type: str | None,
+    group: str | None,
+    dry_run: bool,
+) -> tuple[str, int]:
+    """Shared implementation for enable/disable commands."""
+    from .config import load_config, resolve_config_path, save_config
+
+    config_path = resolve_config_path()
+    if not config_path.exists():
+        return (
+            f"No config found at {config_path}.\n"
+            f"Run `hermes custom-patterns init` to create a starter config.\n",
+            1,
+        )
+
+    config = load_config(force=True, integrity_check=False)
+    action = "enabled" if enable else "disabled"
+    new_state = True if enable else False
+
+    # Build flat list of all patterns with metadata
+    all_entries: list[dict[str, Any]] = []
+    for section_key in ("patterns", "allow_patterns", "deny_patterns"):
+        for entry in config.get(section_key, []):
+            all_entries.append({
+                **entry,
+                "_section": section_key,
+            })
+
+    if not all_entries:
+        return ("No custom patterns defined. Nothing to change.\n", 1)
+
+    # Find matching patterns
+    matched: list[dict[str, Any]] = []
+
+    if group:
+        # Match by group
+        matched = [e for e in all_entries if e.get("group", "") == group]
+        if not matched:
+            return (f"No patterns found in group '{group}'.\n", 1)
+    elif target is not None:
+        # Try index first
+        try:
+            idx = int(target)
+            if 1 <= idx <= len(all_entries):
+                matched = [all_entries[idx - 1]]
+        except ValueError:
+            pass
+
+        # Fall back to description substring match
+        if not matched:
+            matched = [
+                e for e in all_entries
+                if target.lower() in e.get("description", "").lower()
+            ]
+            if pattern_type:
+                type_map = {"block": "patterns", "allow": "allow_patterns", "deny": "deny_patterns"}
+                section = type_map.get(pattern_type.lower(), "")
+                matched = [e for e in matched if e["_section"] == section]
+
+            if len(matched) > 1:
+                lines = [f"Multiple patterns match '{target}'. Use index or be more specific:"]
+                for i, e in enumerate(all_entries):
+                    if e in matched:
+                        type_label = e["_section"].replace("_patterns", "").upper()
+                        lines.append(f"  [{i + 1}] {type_label}: {e['description']}")
+                return ("\n".join(lines) + "\n", 1)
+
+        if not matched:
+            return (f"No patterns matched '{target}'.\n", 1)
+    else:
+        return ("Must specify a pattern index, description, or --group.\n", 1)
+
+    # Check for protected patterns
+    protected = [e for e in matched if e.get("protected")]
+    if protected and not enable:
+        names = ", ".join(f'"{e["description"]}"' for e in protected)
+        return (
+            f"Cannot disable protected patterns: {names}.\n"
+            f"Edit the config file directly to modify protected patterns.\n",
+            1,
+        )
+
+    # Check if already in desired state
+    already = [e for e in matched if e.get("enabled", True) == new_state]
+    if already and not dry_run:
+        names = ", ".join(f'[{get_index(e, all_entries)}] "{e["description"]}"' for e in already)
+        return (f"Pattern(s) already {action}: {names}\n", 0)
+
+    if dry_run:
+        lines = [f"Would {action} the following patterns:"]
+        for e in matched:
+            lines.append(f"  [{get_index(e, all_entries)}] {e['description']}")
+        return ("\n".join(lines) + "\n", 0)
+
+    # Apply the toggle
+    changed = []
+    for entry in matched:
+        entry["enabled"] = new_state
+        changed.append(entry)
+
+    save_config(config, config_path)
+
+    lines = [f"{action.capitalize()} {len(changed)} pattern(s):"]
+    for e in changed:
+        lines.append(f"  [{get_index(e, all_entries)}] {e['description']}")
+    lines.append("")
+    lines.append(_config_update_reminder().strip())
+    return ("\n".join(lines) + "\n", 0)
 
 
 def cmd_validate(
@@ -461,14 +575,182 @@ def cmd_validate(
     quiet: bool = False,
 ) -> tuple[str, int]:
     """Validate config syntax and regexes."""
-    # Stub — implemented in Chunk 6
-    return ("validate: not yet implemented\n", 1)
+    from .config import _load_yaml, _validate_config, resolve_config_path
+
+    if path:
+        config_path = Path(path)
+    else:
+        config_path = resolve_config_path()
+
+    warnings: list[str] = []
+
+    # Check file exists
+    if not config_path.exists():
+        if quiet:
+            return ("", 2)
+        return (f"\u2717 Config not found: {config_path}\n\nResult: INVALID — file not found\n", 2)
+
+    # Load YAML
+    raw = _load_yaml(config_path)
+    if raw is None:
+        if quiet:
+            return ("", 1)
+        return (
+            f"\u2717 Config: {config_path}\n"
+            f"\u2717 YAML syntax: invalid — cannot parse file\n\n"
+            f"Result: INVALID — fix the YAML syntax above before restarting Hermes\n",
+            1,
+        )
+
+    # Validate
+    validated = _validate_config(raw)
+
+    lines: list[str] = []
+    lines.append(f"\u2713 Config: {config_path}")
+    lines.append("\u2713 YAML syntax: valid")
+    lines.append("\u2713 Schema: valid")
+
+    block_count = len(validated.get("patterns", []))
+    allow_count = len(validated.get("allow_patterns", []))
+    deny_count = len(validated.get("deny_patterns", []))
+
+    # Check for regex warnings
+    for section_key, section_label in [
+        ("patterns", "block"),
+        ("allow_patterns", "allow"),
+        ("deny_patterns", "deny"),
+    ]:
+        for i, entry in enumerate(validated.get(section_key, [])):
+            pat = entry.get("pattern", "")
+            if pat in (".*", ".+", "^.*$"):
+                warnings.append(
+                    f"  \u26a0 {section_label}[{i}] regex warning: "
+                    f"pattern '{pat}' matches everything"
+                )
+
+    if warnings:
+        lines.extend(warnings)
+
+    lines.append(
+        f"\u2713 All regexes compile successfully "
+        f"(patterns: {block_count} block, {allow_count} allow, {deny_count} deny)"
+    )
+    lines.append("")
+    lines.append("Result: VALID")
+
+    if quiet:
+        return ("", 0)
+    return ("\n".join(lines) + "\n", 0)
 
 
 def cmd_info() -> tuple[str, int]:
     """Show plugin configuration dashboard."""
-    # Stub — implemented in Chunk 6
-    return ("info: not yet implemented\n", 1)
+    from .config import (
+        _load_hash_data,
+        _resolve_hash_path,
+        get_config_path_display,
+        load_config,
+        resolve_config_path,
+    )
+
+    config_path = resolve_config_path()
+    plugin_version = "0.3.0"
+
+    lines: list[str] = []
+    lines.append(f"Plugin: custom-dangerous-patterns v{plugin_version}")
+
+    if not config_path.exists():
+        lines.append("Config: not found")
+        lines.append("Run `hermes custom-patterns init` to create a starter config.")
+        return ("\n".join(lines) + "\n", 0)
+
+    path_display = get_config_path_display()
+    lines.append(f"Config: {path_display}")
+
+    # Integrity check
+    hash_path = _resolve_hash_path(config_path)
+    if hash_path.is_file():
+        try:
+            import hashlib
+            previous = _load_hash_data(hash_path)
+            prev_hash = previous.get("config_hash")
+            if prev_hash and config_path.is_file():
+                current_hash = hashlib.sha256(
+                    config_path.read_text(encoding="utf-8").encode("utf-8")
+                ).hexdigest()
+                if current_hash == prev_hash:
+                    lines.append("Integrity: \u2713 hash matches previous session")
+                else:
+                    lines.append("Integrity: \u26a0 hash changed since last session")
+            import os
+            mtime = os.path.getmtime(str(config_path))
+            from datetime import datetime
+            lines.append(
+                f"Last changed: {datetime.fromtimestamp(mtime).strftime('%Y-%m-%d %H:%M:%S')}"
+            )
+        except Exception:
+            lines.append("Integrity: unknown")
+
+    # Load config for counts
+    config = load_config(force=True, integrity_check=False)
+    lines.append("")
+    lines.append("Pattern counts:")
+    for label, key in [("Block", "patterns"), ("Allow", "allow_patterns"), ("Deny", "deny_patterns")]:
+        entries = config.get(key, [])
+        active = sum(1 for e in entries if e.get("enabled", True))
+        disabled = len(entries) - active
+        if active and disabled:
+            lines.append(f"  {label}:  {len(entries):>3} ({active} active, {disabled} disabled)")
+        elif active:
+            lines.append(f"  {label}:  {len(entries):>3} ({active} active)")
+        elif entries:
+            lines.append(f"  {label}:  {len(entries):>3} ({disabled} disabled)")
+        else:
+            lines.append(f"  {label}:  {len(entries):>3}")
+
+    # Protected patterns
+    protected_entries = []
+    for section in ("patterns", "allow_patterns", "deny_patterns"):
+        for entry in config.get(section, []):
+            if entry.get("protected"):
+                protected_entries.append(entry)
+
+    if protected_entries:
+        lines.append("")
+        lines.append(
+            f"Protected patterns: {len(protected_entries)} registered, "
+            f"{len([e for e in protected_entries if e.get('enabled', True)])} active"
+        )
+        for entry in protected_entries:
+            status = "\u2713" if entry.get("enabled", True) else "\u2717"
+            lines.append(f"  {status} {entry['description']}")
+
+    # Groups
+    groups: dict[str, dict[str, int]] = {}
+    for section in ("patterns", "allow_patterns", "deny_patterns"):
+        for entry in config.get(section, []):
+            grp = entry.get("group", "")
+            if grp:
+                if grp not in groups:
+                    groups[grp] = {"total": 0, "active": 0}
+                groups[grp]["total"] += 1
+                if entry.get("enabled", True):
+                    groups[grp]["active"] += 1
+
+    if groups:
+        lines.append("")
+        lines.append("Groups:")
+        for grp in sorted(groups):
+            stats = groups[grp]
+            extra = ""
+            if stats["active"] == 0:
+                extra = ", all disabled"
+            lines.append(
+                f"  {grp}: {stats['total']:>6} patterns "
+                f"({stats['active']} active{extra})"
+            )
+
+    return ("\n".join(lines) + "\n", 0)
 
 
 def cmd_logs(
@@ -697,6 +979,14 @@ def _format_builtins(
     if shown == 0:
         lines.append("  (no built-in patterns match the filter)")
     return lines
+
+
+def get_index(entry: dict[str, Any], all_entries: list[dict[str, Any]]) -> int:
+    """Get the 1-based flat index of a pattern entry."""
+    for i, e in enumerate(all_entries):
+        if e is entry:
+            return i + 1
+    return -1
 
 
 def _config_update_reminder() -> str:
