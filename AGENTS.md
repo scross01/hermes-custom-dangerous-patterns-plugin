@@ -203,6 +203,49 @@ When the config path is a directory, CLI write commands (`add`, `remove`, `enabl
 4. **Deduplication on reload.** During directory loading, `_load_yaml()` deduplicates pattern entries by regex key, keeping the last occurrence (later files win). This ensures `99-custom.yaml`'s `enabled: False` correctly overrides the user file's `enabled: True` without duplication.
 5. **To reset CLI-managed patterns**, delete `99-custom.yaml`.
 
+### Glob-to-Regex Pattern Entry (`add --interactive` and `add --glob`)
+
+The `add` command supports glob-style pattern entry so users don't need to write raw regex.
+
+**Conversion rules** (in `patterns.py:glob_to_regex()`):
+- Whitespace runs → `\\s+`
+- `*` → `.*`  (match any chars)
+- `?` → `.`   (match exactly one char)
+- Regex meta-chars (`. ^ $ + { [ ] \\ | ( )`) → escaped
+- `\\b` word boundaries added at alphanumeric starts/ends
+
+**Examples:**
+
+| Glob | Generated regex |
+|---|---|
+| `echo hello` | `\\becho\\s+hello\\b` |
+| `rm -rf /tmp/*` | `\\brm\\s+-rf\\s+/tmp/.*` |
+| `*danger*` | `.*danger.*` |
+| `docker * rm` | `\\bdocker\\s+.*\\s+rm\\b` |
+
+**Interactive flow:**
+1. Type `echo hello` → regex `\\becho\\s+hello\\b` is generated and shown
+2. Confirm with Y (accept), n (try another glob), edit (write raw regex), or Enter (skip glob, write regex)
+3. Optionally enter a single example command to test against the generated regex
+4. If the example fails, a warning is shown and the user can edit the glob and re-test
+5. Description prompt shows the glob as a default (e.g. `Enter description [echo hello]:`). Press Enter to accept the glob as the description, or type a custom one. Empty input re-prompts.
+
+**Config field:** The original glob is saved in an optional `glob` field alongside `pattern` in the YAML config for reference.
+
+**YAML field order:** `_clean_for_serialization` emits fields in this canonical order:
+```
+description: echo hello       # always
+enabled: false                 # only if disabled (omitted when true)
+protected: true                # only if protected (omitted when false)
+group: test                    # only if set
+glob: echo hello               # only if regex was generated from glob
+pattern: \\becho\\s+hello\\b   # always (the actual regex)
+examples:                      # only if provided
+  - echo hello world
+```
+
+**Non-interactive:** Use `--glob` instead of `--pattern`. Mutually exclusive — cannot specify both.
+
 ### Adding a new subcommand
 
 1. Add the `cmd_*` handler in `cli.py` (returns `tuple[str, int]`)

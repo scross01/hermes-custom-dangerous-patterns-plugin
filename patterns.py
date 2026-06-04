@@ -153,6 +153,62 @@ def is_deny_pattern(command: str) -> str | None:
     return None
 
 
+def glob_to_regex(glob_str: str) -> str:
+    """Convert a glob-style command pattern to a regex.
+
+    Used by `add --interactive` and `add --glob` so users can type
+    intuitive patterns like ``echo hello`` instead of raw regex like
+    ``\\becho\\s+hello\\b``.
+
+    Conversion rules:
+        - Whitespace runs  → ``\\s+``
+        - ``*``            → ``.*``
+        - ``?``            → ``.``
+        - Regex meta-chars → escaped
+          (``.`` ``^`` ``$`` ``+`` ``{`` ``[`` ``]`` ``\\`` ``|`` ``(`` ``)``)
+        - ``\\b`` at start if first token starts with alphanumeric
+        - ``\\b`` at end if last token ends with alphanumeric
+
+    Args:
+        glob_str: A glob-style pattern (e.g. ``"echo hello"``, ``"rm -rf /tmp/*"``).
+
+    Returns:
+        The equivalent regex pattern string.
+    """
+    # Tokenize: split on whitespace to preserve whitespace positions
+    tokens = glob_str.split()
+    if not tokens:
+        return ""
+
+    _regex_meta = set(r".^$+{}[]\|()")
+
+    def _process_token(token: str) -> str:
+        """Convert a single glob token to its regex fragment."""
+        result: list[str] = []
+        for ch in token:
+            if ch == "*":
+                result.append(".*")
+            elif ch == "?":
+                result.append(".")
+            elif ch in _regex_meta:
+                result.append("\\" + ch)
+            else:
+                result.append(ch)
+        return "".join(result)
+
+    regex_body = r"\s+".join(_process_token(t) for t in tokens)
+
+    # Add word boundaries only at positions that are alphanumeric.
+    # Use tokens (not raw glob_str) so leading/trailing whitespace
+    # and special chars like * or ? are handled correctly.
+    if tokens and tokens[0] and tokens[0][0].isalnum():
+        regex_body = r"\b" + regex_body
+    if tokens and tokens[-1] and tokens[-1][-1].isalnum():
+        regex_body = regex_body + r"\b"
+
+    return regex_body
+
+
 def _normalize(command: str) -> str:
     """Normalize a command string for pattern matching.
 

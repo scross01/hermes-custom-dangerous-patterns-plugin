@@ -246,7 +246,11 @@ def _validate_pattern(entry: Any, index: int, field: str) -> dict[str, str] | No
     if not isinstance(protected, bool):
         protected = False
 
-    return {
+    glob_str = entry.get("glob")
+    if glob_str is not None and not isinstance(glob_str, str):
+        glob_str = None
+
+    result = {
         "pattern": pattern.strip(),
         "description": description.strip(),
         "examples": examples,
@@ -254,6 +258,9 @@ def _validate_pattern(entry: Any, index: int, field: str) -> dict[str, str] | No
         "group": group.strip(),
         "protected": protected,
     }
+    if glob_str:
+        result["glob"] = glob_str
+    return result
 
 
 def _validate_config(raw: dict[str, Any]) -> dict[str, Any]:
@@ -452,18 +459,19 @@ def _dedup_entries(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 def _normalized_for_compare(entry: dict[str, Any]) -> dict[str, Any]:
     """Normalize an entry for comparison (same as _clean_for_serialization)."""
-    out: dict[str, Any] = {
-        "pattern": entry["pattern"],
-        "description": entry.get("description", ""),
-    }
-    if entry.get("examples"):
-        out["examples"] = entry["examples"]
+    out: dict[str, Any] = {}
+    out["description"] = entry.get("description", "")
     if entry.get("enabled") is False:
         out["enabled"] = False
-    if entry.get("group"):
-        out["group"] = entry["group"]
     if entry.get("protected") is True:
         out["protected"] = True
+    if entry.get("group"):
+        out["group"] = entry["group"]
+    if entry.get("glob"):
+        out["glob"] = entry["glob"]
+    out["pattern"] = entry["pattern"]
+    if entry.get("examples"):
+        out["examples"] = entry["examples"]
     return out
 
 
@@ -540,21 +548,29 @@ def _write_yaml(output: dict[str, Any], path: Path) -> None:
 
 def _clean_for_serialization(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Remove internal-only fields and empty optional fields for clean YAML output."""
+    # Field order in YAML output (user-facing readability):
+    #   description  — always
+    #   enabled      — only if disabled (omitted when true — default)
+    #   protected    — only if protected (omitted when false — default)
+    #   group        — only if set
+    #   glob         — only if regex was generated from a glob
+    #   pattern      — always (the actual regex)
+    #   examples     — only if provided
     cleaned = []
     for entry in entries:
-        out: dict[str, Any] = {
-            "pattern": entry["pattern"],
-            "description": entry.get("description", ""),
-        }
-        # Only include non-default optional fields
-        if entry.get("examples"):
-            out["examples"] = entry["examples"]
+        out: dict[str, Any] = {}
+        out["description"] = entry.get("description", "")
         if entry.get("enabled") is False:
             out["enabled"] = False
-        if entry.get("group"):
-            out["group"] = entry["group"]
         if entry.get("protected") is True:
             out["protected"] = True
+        if entry.get("group"):
+            out["group"] = entry["group"]
+        if entry.get("glob"):
+            out["glob"] = entry["glob"]
+        out["pattern"] = entry["pattern"]
+        if entry.get("examples"):
+            out["examples"] = entry["examples"]
         cleaned.append(out)
     return cleaned
 

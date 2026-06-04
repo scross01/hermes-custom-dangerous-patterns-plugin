@@ -768,15 +768,38 @@ def cmd_add(
     enabled_flag: bool | None = None,
     protected: bool = False,
     dry_run: bool = False,
+    glob_str: str | None = None,
 ) -> tuple[str, int]:
     """Add a custom pattern via interactive prompts or CLI flags."""
     from .config import load_config, resolve_config_path
+    from .patterns import glob_to_regex
 
     config_path = resolve_config_path()
     config = load_config(force=True, integrity_check=False)
 
     if interactive:
         return _add_interactive(config, config_path, dry_run)
+
+    # Handle --glob (mutually exclusive with --pattern)
+    if glob_str and pattern:
+        return (
+            "Error: Cannot specify both --glob and --pattern.\n"
+            "Use one or the other.\n",
+            1,
+        )
+    if glob_str:
+        if not glob_str.strip():
+            return (
+                "Error: --glob cannot be empty or whitespace-only.\n",
+                1,
+            )
+        pattern = glob_to_regex(glob_str)
+        if not pattern:
+            return (
+                "Error: --glob produced an empty regex. "
+                "Check that the glob contains non-whitespace characters.\n",
+                1,
+            )
 
     # Non-interactive mode: require --type, --pattern, --description
     if not pattern_type or not pattern or not description:
@@ -790,14 +813,23 @@ def cmd_add(
     return _add_noninteractive(
         config, config_path, pattern_type, pattern, description,
         group or "", examples or [], enabled_flag if enabled_flag is not None else True,
-        protected, dry_run,
+        protected, dry_run, glob_str if glob_str else None,
     )
 
 
 def _add_interactive(
     config: dict[str, Any], config_path: Path, dry_run: bool,
 ) -> tuple[str, int]:
-    """Guided interactive pattern entry."""
+    """Guided interactive pattern entry with glob-to-regex support.
+
+    Flow:
+      1. Pattern type (block/allow/deny)
+      2. Glob entry → auto-generate regex → confirm/edit
+      3. Optional example testing with validation loop
+      4. Description, group, enabled, protected
+    """
+    from .patterns import glob_to_regex
+
     print()
     print("Pattern type:")
     print("  [1] block  — triggers approval prompt (once/session/always/deny)")
@@ -814,23 +846,126 @@ def _add_interactive(
     if not pattern_type:
         return (f"Invalid choice: {choice}. Use 1, 2, or 3.\n", 1)
 
+    # --- Glob entry ---
     try:
-        pattern = input("Enter regex pattern: ").strip()
-        if not pattern:
-            return ("Pattern cannot be empty.\n", 1)
+        glob_input = input(
+            "Enter a glob-style pattern (or press Enter for raw regex): "
+        ).strip()
     except (EOFError, KeyboardInterrupt):
         return ("\nCancelled.\n", 1)
 
+    glob_str = ""
+    if glob_input:
+        glob_str = glob_input
+        pattern = glob_to_regex(glob_input)
+        print(f"\nGenerated regex: {pattern}")
+
+        try:
+            confirm = input("Accept generated regex? [Y/n/edit]: ").strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            return ("\nCancelled.\n", 1)
+
+        if confirm == "n":
+            try:
+                glob_input = input(
+                    "Enter a glob-style pattern (or press Enter for raw regex): "
+                ).strip()
+                if not glob_input:
+                    glob_str = ""  # Fall through to raw regex
+                else:
+                    glob_str = glob_input
+                    pattern = glob_to_regex(glob_input)
+                    print(f"Generated regex: {pattern}")
+                    confirm2 = input("Accept generated regex? [Y/n/edit]: ").strip().lower()
+                    if confirm2 == "n":
+                        glob_str = ""  # Fall through to raw regex
+                    elif confirm2 in ("edit", "e"):
+                        glob_str = ""
+            except (EOFError, KeyboardInterrupt):
+                return ("\nCancelled.\n", 1)
+        elif confirm in ("edit", "e"):
+            glob_str = ""  # Fall through to raw regex below
+    if not glob_str:
+        try:
+            pattern = input("Enter regex pattern: ").strip()
+            if not pattern:
+                return ("Pattern cannot be empty.\n", 1)
+        except (EOFError, KeyboardInterrupt):
+            return ("\nCancelled.\n", 1)
+
+    # --- Example testing ---
+    example: str = ""
     try:
-        description = input("Enter description: ").strip()
-        if not description:
-            return ("Description cannot be empty.\n", 1)
+        ex_input = input(
+            "\nEnter an example command to test (press Enter to skip): "
+        ).strip()
     except (EOFError, KeyboardInterrupt):
         return ("\nCancelled.\n", 1)
+
+    if ex_input:
+        example = ex_input
+        print("\nTesting example against generated regex...")
+        try:
+            compiled = re.compile(pattern, re.IGNORECASE | re.DOTALL)
+        except re.error as exc:
+            return (f"Error: generated regex is invalid: {exc}\n", 1)
+
+        if compiled.search(example):
+            print(f"  \u2713 {example}")
+        else:
+            print(f"  \u2717 {example}  (does not match)")
+            try:
+                fix = input("Edit glob to fix? [y/N]: ").strip().lower()
+            except (EOFError, KeyboardInterrupt):
+                return ("\nCancelled.\n", 1)
+
+            if fix == "y":
+                try:
+                    glob_input = input("Enter glob pattern: ").strip()
+                    if glob_input:
+                        glob_str = glob_input
+                        pattern = glob_to_regex(glob_input)
+                        print(f"Generated regex: {pattern}")
+                        try:
+                            compiled = re.compile(
+                                pattern, re.IGNORECASE | re.DOTALL
+                            )
+                        except re.error as compile_exc:
+                            print(
+                                f"  Error: generated regex is invalid: "
+                                f"{compile_exc}"
+                            )
+                        else:
+                            print("Re-testing...")
+                            if compiled.search(example):
+                                print(f"  \u2713 {example}")
+                            else:
+                                print(f"  \u2717 {example}")
+                    else:
+                        return ("Pattern cannot be empty.\n", 1)
+                except (EOFError, KeyboardInterrupt):
+                    return ("\nCancelled.\n", 1)
+
+    # --- Description (glob is offered as default) ---
+    while True:
+        try:
+            if glob_str:
+                prompt = f"\nEnter description [{glob_str}]: "
+            else:
+                prompt = "\nEnter description: "
+            description = input(prompt).strip()
+            if not description and glob_str:
+                description = glob_str
+                break
+            elif not description:
+                print("Description cannot be empty.")
+                continue
+            break
+        except (EOFError, KeyboardInterrupt):
+            return ("\nCancelled.\n", 1)
 
     try:
         group = input("Group (optional, press Enter to skip): ").strip()
-        _ = group  # use later
     except (EOFError, KeyboardInterrupt):
         return ("\nCancelled.\n", 1)
 
@@ -848,7 +983,8 @@ def _add_interactive(
 
     return _add_noninteractive(
         config, config_path, pattern_type, pattern, description,
-        group, [], enabled_flag, protected, dry_run,
+        group, [example] if example else [], enabled_flag, protected, dry_run,
+        glob_str if glob_str else None,
     )
 
 
@@ -863,6 +999,7 @@ def _add_noninteractive(
     enabled_flag: bool,
     protected: bool,
     dry_run: bool,
+    glob_str: str | None = None,
 ) -> tuple[str, int]:
     """Add a pattern via CLI flags."""
     from .config import save_config
@@ -892,16 +1029,22 @@ def _add_noninteractive(
     }
     if examples:
         entry["examples"] = examples
+    if glob_str:
+        entry["glob"] = glob_str
 
     if dry_run:
-        return (
-            f"Would add {pattern_type} pattern: \"{description}\"\n"
-            f"  Pattern: {pattern}\n"
-            f"  Group: {group or '(none)'}\n"
-            f"  Enabled: {enabled_flag}\n"
-            f"  Protected: {protected}\n",
-            0,
-        )
+        lines = [
+            f"Would add {pattern_type} pattern: \"{description}\"",
+            f"  Pattern: {pattern}"
+        ]
+        if glob_str:
+            lines.append(f"  Glob: {glob_str}")
+        lines.extend([
+            f"  Group: {group or '(none)'}",
+            f"  Enabled: {enabled_flag}",
+            f"  Protected: {protected}",
+        ])
+        return ("\n".join(lines) + "\n", 0)
 
     config.setdefault(section_key, []).append(entry)
     save_config(config, config_path)
@@ -1210,6 +1353,7 @@ def _handle_add(args: Any) -> None:
         enabled_flag=not getattr(args, "disabled", False),
         protected=getattr(args, "protected", False),
         dry_run=getattr(args, "dry_run", False),
+        glob_str=getattr(args, "glob", None),
     )
     _emit(output, exit_code)
 
@@ -1509,6 +1653,11 @@ def register_cli(subparser: argparse.ArgumentParser) -> None:
     add_p.add_argument(
         "--dry-run", action="store_true",
         help="Show what would be added without saving",
+    )
+    add_p.add_argument(
+        "--glob", default=None,
+        help="Glob-style pattern (e.g. 'echo hello'). Converted to regex. "
+             "Mutually exclusive with --pattern.",
     )
     add_p.set_defaults(func=_handle_add)
 

@@ -333,6 +333,175 @@ def test_normalize_comprehensive():
     assert result == "vultr 2"
 
 
+# ---------------------------------------------------------------------------
+# glob_to_regex
+# ---------------------------------------------------------------------------
+
+
+def test_glob_to_regex_basic():
+    """Simple two-word glob generates correct regex."""
+    from patterns import glob_to_regex
+
+    assert glob_to_regex("echo hello") == r"\becho\s+hello\b"
+
+
+def test_glob_to_regex_wildcard_end():
+    """Trailing * produces unbounded .*"""
+    from patterns import glob_to_regex
+
+    result = glob_to_regex("rm -rf /tmp/*")
+    assert result == r"\brm\s+-rf\s+/tmp/.*"
+
+
+def test_glob_to_regex_wildcard_both_ends():
+    """Leading and trailing * → no word boundaries."""
+    from patterns import glob_to_regex
+
+    result = glob_to_regex("*danger*")
+    assert result == r".*danger.*"
+
+
+def test_glob_to_regex_mid_wildcard():
+    """Wildcard in the middle of the pattern."""
+    from patterns import glob_to_regex
+
+    result = glob_to_regex("docker * rm")
+    assert result == r"\bdocker\s+.*\s+rm\b"
+
+
+def test_glob_to_regex_question_mark():
+    """Question mark glob → single-char regex."""
+    from patterns import glob_to_regex
+
+    result = glob_to_regex("chmod 7??")
+    assert result == r"\bchmod\s+7.."
+
+
+def test_glob_to_regex_meta_chars():
+    """Regex meta-chars in glob are escaped."""
+    from patterns import glob_to_regex
+
+    result = glob_to_regex(".hidden")
+    assert result == r"\.hidden\b"
+
+
+def test_glob_to_regex_pipes():
+    """Pipe characters are escaped."""
+    from patterns import glob_to_regex
+
+    result = glob_to_regex("*curl* | *sh*")
+    assert result == r".*curl.*\s+\|\s+.*sh.*"
+
+
+def test_glob_to_regex_parentheses():
+    """Parentheses are escaped."""
+    from patterns import glob_to_regex
+
+    result = glob_to_regex("python -c (.*)")
+    assert result == r"\bpython\s+-c\s+\(\..*\)"
+
+
+def test_glob_to_regex_empty():
+    """Empty input returns empty string."""
+    from patterns import glob_to_regex
+
+    assert glob_to_regex("") == ""
+
+
+def test_glob_to_regex_single_word():
+    """Single word gets word boundaries."""
+    from patterns import glob_to_regex
+
+    assert glob_to_regex("echo") == r"\becho\b"
+
+
+def test_glob_to_regex_whitespace_run():
+    """Multiple spaces compress to single \\s+."""
+    from patterns import glob_to_regex
+
+    result = glob_to_regex("git    push   --force")
+    assert result == r"\bgit\s+push\s+--force\b"
+
+
+def test_glob_to_regex_leading_trailing_spaces():
+    """Leading/trailing whitespace in input is ignored."""
+    from patterns import glob_to_regex
+
+    result = glob_to_regex("  echo hello  ")
+    assert result == r"\becho\s+hello\b"
+
+
+def test_glob_to_regex_numeric_boundary():
+    """Numeric first/last char gets word boundary."""
+    from patterns import glob_to_regex
+
+    result = glob_to_regex("7z x")
+    assert result == r"\b7z\s+x\b"
+
+
+def test_glob_to_regex_brackets():
+    """Square brackets are escaped."""
+    from patterns import glob_to_regex
+
+    result = glob_to_regex("echo [hello]")
+    assert result == r"\becho\s+\[hello\]"
+
+
+def test_glob_to_regex_compiles_valid_regex():
+    """Every glob_to_regex output must compile as valid regex."""
+    from patterns import glob_to_regex
+
+    test_cases = [
+        "echo hello",
+        "rm -rf /tmp/*",
+        "*danger*",
+        "docker * rm",
+        "git push --force",
+        "chmod 777",
+        ".hidden",
+        "*curl* | *sh*",
+        "python -c (.*)",
+        "echo",
+        "npm install *",
+        "apt-get purge *",
+        "kill -9",
+        "$HOME/test",
+    ]
+    for glob_in in test_cases:
+        regex = glob_to_regex(glob_in)
+        re.compile(regex, re.IGNORECASE | re.DOTALL)  # Must not raise
+
+
+def test_glob_to_regex_matches_as_expected():
+    """Generated regexes match the commands they should."""
+    from patterns import glob_to_regex
+
+    cases = [
+        ("echo hello", "echo hello", True),
+        ("echo hello", "  echo  hello  ", True),  # \s+ matches multiple spaces
+        ("rm -rf /tmp/*", "rm -rf /tmp/foo", True),
+        ("rm -rf /tmp/*", "rm -rf /var/foo", False),
+        ("*danger*", "very danger ous", True),
+        ("*danger*", "safe", False),
+        ("docker * rm", "docker container rm", True),
+        ("docker * rm", "docker compose up", False),
+        ("git push --force", "git push --force origin main", True),
+        ("git push --force", "git push origin main", False),
+        (".hidden", ".hidden", True),
+        (".hidden", "hidden", False),
+        ("echo", "echo", True),
+        ("echo", "echoooo", False),  # word boundary prevents partial match
+    ]
+    for glob_in, command, should_match in cases:
+        regex = glob_to_regex(glob_in)
+        compiled = re.compile(regex, re.IGNORECASE | re.DOTALL)
+        result = bool(compiled.search(command))
+        assert result == should_match, (
+            f"glob={glob_in!r} → regex={regex!r} search={command!r} "
+            f"expected={should_match} got={result}"
+        )
+
+
 def test_normalize_fallback_on_missing_strip_ansi(monkeypatch):
     """Fallback regex works when tools.ansi_strip is unavailable."""
     import sys
