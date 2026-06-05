@@ -42,6 +42,11 @@ def _resolve_config_path() -> Path:
       1. HERMES_CUSTOM_PATTERNS_PATH env var
       2. ~/.hermes/custom-dangerous-patterns.yaml (single file)
       3. ~/.hermes/custom-dangerous-patterns.d/ (directory of YAML files)
+
+    When both the single file and the directory exist (combined mode),
+    the directory is returned so that CLI write operations (add, remove,
+    enable, disable) go to ``99-custom.yaml`` inside the directory.
+    Loading merges both locations — see :func:`_load_yaml`.
     """
     env_path = os.environ.get(_ENV_OVERRIDE, "").strip()
     if env_path:
@@ -54,10 +59,15 @@ def _resolve_config_path() -> Path:
         hermes_home = Path.home() / ".hermes"
 
     single_file = hermes_home / _DEFAULT_CONFIG_FILENAME
+    dir_path = hermes_home / "custom-dangerous-patterns.d"
+
+    # Combined mode: both exist — prefer dir for writes; loading merges both
+    if single_file.is_file() and dir_path.is_dir():
+        return dir_path
+
     if single_file.is_file():
         return single_file
 
-    dir_path = hermes_home / "custom-dangerous-patterns.d"
     if dir_path.is_dir():
         return dir_path
 
@@ -99,13 +109,25 @@ def _load_yaml(path: Path) -> dict[str, Any] | None:
     # Directory mode (v0.2.0): load *.yaml files in alphabetical order
     if path.is_dir():
         yaml_files = sorted(path.glob("*.yaml"))
-        if not yaml_files:
+
+        # Combined mode: start by loading the sibling .yaml file as baseline
+        # (e.g., ~/.hermes/custom-dangerous-patterns.yaml alongside
+        #  ~/.hermes/custom-dangerous-patterns.d/). Directory files are
+        # merged on top so they take precedence via dedup (last wins).
+        sibling_file = path.parent / (path.stem + ".yaml")
+        if sibling_file.is_file():
+            base = _load_single_yaml(sibling_file) or {}
+        else:
+            base = {}
+
+        if not yaml_files and not base:
             logger.debug(
                 "custom-dangerous-patterns: no *.yaml files in directory %s",
                 path,
             )
             return None
-        merged: dict[str, Any] = {}
+
+        merged: dict[str, Any] = dict(base)
         for yf in yaml_files:
             single = _load_single_yaml(yf)
             if single:
@@ -117,6 +139,10 @@ def _load_yaml(path: Path) -> dict[str, Any] | None:
                 merged.setdefault("patterns", [])
                 merged.setdefault("allow_patterns", [])
                 merged.setdefault("deny_patterns", [])
+        # Ensure sections exist even if neither base nor any yaml_file had them
+        for key in ("patterns", "allow_patterns", "deny_patterns"):
+            if key not in merged:
+                merged[key] = []
         # Deduplicate pattern entries by key (later files win) so that
         # removals written to 99-custom.yaml (enabled: False) correctly
         # override matching entries from user-created files — without
@@ -124,10 +150,12 @@ def _load_yaml(path: Path) -> dict[str, Any] | None:
         for section in ("patterns", "allow_patterns", "deny_patterns"):
             merged[section] = _dedup_entries(merged[section])
         if merged:
+            source_desc = f"{len(yaml_files)} files in {path}"
+            if base:
+                source_desc += f" + {sibling_file.name}"
             logger.info(
-                "custom-dangerous-patterns: loaded config from %d files in %s",
-                len(yaml_files),
-                path,
+                "custom-dangerous-patterns: loaded config from %s",
+                source_desc,
             )
         return merged if merged else None
 
@@ -349,7 +377,59 @@ def save_config(config_dict: dict[str, Any], path: Path | None = None) -> Path:
     # Directory mode: compute delta and write only changed entries
     if path.is_dir():
         target = path / _CLI_WRITE_FILENAME
+
+        # Load user baseline: directory files (excluding 99-custom.yaml)
         user_config = _load_yaml_excluding(path, _CLI_WRITE_FILENAME)
+
+        # Combined mode: also include the sibling .yaml file in the baseline
+        sibling_file = path.parent / (path.stem + ".yaml")
+        if sibling_file.is_file():
+            sibling = _load_single_yaml(sibling_file)
+            if sibling:
+                if user_config is None:
+                    user_config = dict(sibling)
+                else:
+                    for key, val in sibling.items():
+                        if (
+                            key in user_config
+                            and isinstance(user_config[key], list)
+                            and isinstance(val, list)
+                        ):
+                            user_config[key].extend(val)
+                        else:
+                            user_config[key] = val
+                    for key in ("patterns", "allow_patterns", "deny_patterns"):
+                        user_config.setdefault(key, [])
+
+        # Load existing 99-custom.yaml to include in the user baseline
+        # (so patterns previously written via CLI aren't detected as "new"
+        # by delta computation) AND to preserve them in the output.
+        existing_cli: dict[str, Any] = {}
+        if target.is_file():
+            loaded = _load_single_yaml(target)
+            if loaded:
+                existing_cli = loaded
+
+        # Include 99-custom.yaml entries in the user baseline so the delta
+        # recognizes them as existing (not new). Without this, patterns
+        # previously written to 99-custom.yaml get detected as "new" on
+        # every CLI operation and re-written, accumulating stale entries.
+        if existing_cli:
+            if user_config is None:
+                user_config = dict(existing_cli)
+            else:
+                for key, val in existing_cli.items():
+                    if (
+                        key in user_config
+                        and isinstance(user_config[key], list)
+                        and isinstance(val, list)
+                    ):
+                        user_config[key].extend(val)
+                    else:
+                        user_config[key] = val
+                for key in ("patterns", "allow_patterns", "deny_patterns"):
+                    user_config.setdefault(key, [])
+
         user_validated = (
             _validate_config(user_config)
             if user_config
@@ -360,15 +440,43 @@ def save_config(config_dict: dict[str, Any], path: Path | None = None) -> Path:
             user_validated[section] = _dedup_entries(user_validated[section])
         delta = _compute_delta(user_validated, config_dict)
 
-        # Build output from delta (only non-empty sections)
-        output: dict[str, Any] = {}
+        # Build output: start with existing 99-custom.yaml entries, overlay
+        # delta on top (delta replaces matching entries by pattern key).
+        # This preserves pre-existing entries in 99-custom.yaml that haven't
+        # changed, preventing them from being lost on every rewrite.
+        output: dict[str, Any] = dict(existing_cli) if existing_cli else {}
         for key in ("patterns", "allow_patterns", "deny_patterns"):
-            entries = delta.get(key, [])
-            if entries:
-                output[key] = _clean_for_serialization(entries)
+            delta_entries = delta.get(key, [])
+            existing_section = output.get(key, []) if output else []
+
+            if not delta_entries and not existing_section:
+                continue
+
+            if delta_entries:
+                # Replace matching entries in output with delta entries
+                delta_keys = {_pattern_key(e) for e in delta_entries}
+                filtered_existing = [
+                    e for e in existing_section
+                    if _pattern_key(e) not in delta_keys
+                ]
+                combined = (
+                    _clean_for_serialization(filtered_existing)
+                    + _clean_for_serialization(delta_entries)
+                )
+            else:
+                # No delta changes — keep existing entries as-is
+                if existing_section:
+                    combined = _clean_for_serialization(existing_section)
+                else:
+                    continue
+
+            if combined:
+                output[key] = combined
+            elif key in output:
+                del output[key]
 
         if not output:
-            # Nothing changed — no-op
+            # Nothing to write — no-op
             return target
 
         _write_yaml(output, target)

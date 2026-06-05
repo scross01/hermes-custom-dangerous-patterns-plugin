@@ -486,11 +486,12 @@ def test_cmd_init_creates_config(monkeypatch, cli_module, tmp_path):
         lambda config_dict, path=None: config_path,
     )
 
-    output, exit_code = cli_module.cmd_init()
+    output, exit_code = cli_module.cmd_init(mode="file")
     assert exit_code == 0
     assert "Created:" in output
     assert "Next steps:" in output
-    assert "list --disabled" in output
+    assert "list" in output
+    assert "enable --group" in output
 
 
 def test_cmd_init_existing_config_no_force(monkeypatch, cli_module, tmp_path):
@@ -543,7 +544,7 @@ def test_cmd_init_with_examples(monkeypatch, cli_module, tmp_path):
         lambda config_dict, path=None: config_path,
     )
 
-    output, exit_code = cli_module.cmd_init(with_examples=True)
+    output, exit_code = cli_module.cmd_init(with_examples=True, mode="file")
     assert exit_code == 0
     assert "Created:" in output
 

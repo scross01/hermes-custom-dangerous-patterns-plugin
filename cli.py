@@ -275,16 +275,51 @@ def _check_builtins_for_test(
 def cmd_init(
     with_examples: bool = False,
     force: bool = False,
+    mode: str | None = None,
 ) -> tuple[str, int]:
-    """Create a starter config file and guide the user.
+    """Create a starter config file or directory and guide the user.
 
     All example patterns are DISABLED by default — the user must
     review and enable the ones they want. Use --with-examples for
     a fully-enabled demonstration config.
+
+    Args:
+        with_examples: Include fully-enabled example patterns.
+        force: Overwrite existing config without asking.
+        mode: ``"file"`` for single file, ``"dir"`` for directory,
+              or ``None`` to prompt interactively when neither exists.
     """
     from .config import resolve_config_path, save_config
 
+    # Get the resolved default config path (~/.hermes/custom-dangerous-patterns.yaml)
     config_path = resolve_config_path()
+    dir_path = config_path.parent / "custom-dangerous-patterns.d"
+
+    # Resolve mode: explicit flag, existing location, or interactive prompt
+    if mode is None:
+        if config_path.exists():
+            mode = "file"
+        elif dir_path.exists():
+            config_path = dir_path
+            mode = "dir"
+        else:
+            print()
+            print("Config location:")
+            print("  [1] Single file (~/.hermes/custom-dangerous-patterns.yaml)")
+            print("  [2] Config directory (~/.hermes/custom-dangerous-patterns.d/)")
+            try:
+                choice = input("Choose [1]: ").strip() or "1"
+            except (EOFError, KeyboardInterrupt):
+                return ("\nCancelled.\n", 1)
+            mode = "file" if choice == "1" else "dir"
+            if mode == "dir":
+                config_path = dir_path
+            else:
+                config_path = config_path.parent / "custom-dangerous-patterns.yaml"
+    elif mode == "dir":
+        config_path = dir_path
+    elif mode == "file":
+        config_path = config_path.parent / "custom-dangerous-patterns.yaml"
 
     # Check if config already exists
     if config_path.exists():
@@ -306,19 +341,64 @@ def cmd_init(
     allow_count = len(config_dict.get("allow_patterns", []))
     deny_count = len(config_dict.get("deny_patterns", []))
 
-    save_config(config_dict, config_path)
+    if mode == "dir":
+        config_path.mkdir(parents=True, exist_ok=True)
+
+        if with_examples:
+            # Write test patterns (always disabled) to 00-test.yaml
+            test_config = _build_minimal_starter_config()
+            _write_init_yaml(test_config, config_path / "00-test.yaml")
+
+            saved_files = ["00-test.yaml"]
+
+            # Write example patterns (fully enabled) to 01-examples.yaml.
+            # Guard against the fallback case where _load_example_config returns
+            # the test config (example file not found) — skip to avoid duplicates.
+            is_fallback = (
+                config_dict.get("patterns", []) == test_config.get("patterns", [])
+                and config_dict.get("deny_patterns", []) == test_config.get("deny_patterns", [])
+            )
+            if not is_fallback:
+                _write_init_yaml(config_dict, config_path / "01-examples.yaml")
+                saved_files.append("01-examples.yaml")
+                # Add test pattern counts to the example counts already tallied
+                block_count += len(test_config.get("patterns", []))
+                allow_count += len(test_config.get("allow_patterns", []))
+                deny_count += len(test_config.get("deny_patterns", []))
+        else:
+            target = config_path / "00-test.yaml"
+            _write_init_yaml(config_dict, target)
+            saved_files = ["00-test.yaml"]
+
+        saved_display = f"{config_path}/ ({', '.join(saved_files)})"
+    else:
+        save_config(config_dict, config_path)
+        saved_display = str(config_path)
 
     lines = [
-        f"Created: {config_path} ({block_count} block, {allow_count} allow, "
+        f"Created: {saved_display} ({block_count} block, {allow_count} allow, "
         f"{deny_count} deny patterns — all disabled)",
         "",
         "Next steps:",
-        "  1. Review the config: hermes custom-dangerous-patterns list --disabled",
+        "  1. Review the config: hermes custom-dangerous-patterns list",
         "  2. Enable patterns you want: hermes custom-dangerous-patterns enable --group cloud",
-        '  3. Test your patterns: hermes custom-dangerous-patterns test "vultr instance delete"',
+        "  3. Add new custom patterns: hermes custom-dangerous-patterns add",
         "  4. Restart Hermes for changes to take effect",
     ]
     return ("\n".join(lines) + "\n", 0)
+
+
+def _write_init_yaml(config_dict: dict[str, Any], target: Path) -> None:
+    """Write a config dict to a YAML file during init (not delta-based)."""
+    from .config import _clean_for_serialization, _write_yaml
+
+    output: dict[str, Any] = {}
+    for key in ("patterns", "allow_patterns", "deny_patterns"):
+        entries = config_dict.get(key, [])
+        if entries:
+            output[key] = _clean_for_serialization(entries)
+    if output:
+        _write_yaml(output, target)
 
 
 def _build_minimal_starter_config() -> dict[str, Any]:
@@ -1295,6 +1375,7 @@ def _handle_init(args: Any) -> None:
     output, exit_code = cmd_init(
         with_examples=getattr(args, "with_examples", False),
         force=getattr(args, "force", False),
+        mode=getattr(args, "mode", None),
     )
     _emit(output, exit_code)
 
@@ -1538,6 +1619,10 @@ def register_cli(subparser: argparse.ArgumentParser) -> None:
     init_p.add_argument(
         "-f", "--force", action="store_true",
         help="Overwrite existing config",
+    )
+    init_p.add_argument(
+        "--mode", choices=["file", "dir"], default=None,
+        help="Config mode: single file or directory (default: prompt interactively)",
     )
     init_p.set_defaults(func=_handle_init)
 

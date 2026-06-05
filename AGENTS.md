@@ -134,7 +134,27 @@ print('Allow match:', is_allow_pattern('vultr instance list'))
 ## Config path resolution
 
 1. `$HERMES_CUSTOM_PATTERNS_PATH` env var
-2. `~/.hermes/custom-dangerous-patterns.yaml`
+2. `~/.hermes/custom-dangerous-patterns.yaml` (single file)
+3. `~/.hermes/custom-dangerous-patterns.d/` (directory of YAML files)
+
+### Combined mode
+
+When **both** the single file (`custom-dangerous-patterns.yaml`) and the directory
+(`custom-dangerous-patterns.d/`) exist, the plugin automatically enters
+*combined mode*:
+
+- **Loading:** `_load_yaml()` loads the sibling `.yaml` file first as a
+  baseline, then loads all `.yaml` files from the directory on top. Dedup
+  ensures directory files take precedence (last occurrence wins).
+- **Writes:** `_resolve_config_path()` returns the directory, so CLI write
+  operations (`add`, `remove`, `enable`, `disable`) go to `99-custom.yaml`
+  inside the directory. The sibling `.yaml` file is included in the user
+  baseline for delta computation — changes are tracked correctly across
+  both locations.
+
+This allows a gradual migration from single-file mode to directory mode:
+leave `custom-dangerous-patterns.yaml` in place and create
+`custom-dangerous-patterns.d/` alongside it. Both are merged automatically.
 
 ## CLI architecture
 
@@ -202,6 +222,24 @@ When the config path is a directory, CLI write commands (`add`, `remove`, `enabl
 3. **Removal as disabled.** When a pattern is removed via CLI, the delta writes it to `99-custom.yaml` with `enabled: False` so the removal persists across reloads.
 4. **Deduplication on reload.** During directory loading, `_load_yaml()` deduplicates pattern entries by regex key, keeping the last occurrence (later files win). This ensures `99-custom.yaml`'s `enabled: False` correctly overrides the user file's `enabled: True` without duplication.
 5. **To reset CLI-managed patterns**, delete `99-custom.yaml`.
+
+### `init` command — multi-mode config creation
+
+The `init` command now supports choosing between single-file and directory
+mode via `--mode {file,dir}`. When neither exists and no flag is given,
+the user is prompted interactively:
+
+```
+Config location:
+  [1] Single file (~/.hermes/custom-dangerous-patterns.yaml)
+  [2] Config directory (~/.hermes/custom-dangerous-patterns.d/)
+Choose [1]:
+```
+
+- **`--mode file`:** Creates `~/.hermes/custom-dangerous-patterns.yaml`.
+- **`--mode dir`:** Creates `~/.hermes/custom-dangerous-patterns.d/` and
+  writes the starter config to `99-custom.yaml` (or `99-examples.yaml` when
+  `--with-examples` is used).
 
 ### Glob-to-Regex Pattern Entry (`add --interactive` and `add --glob`)
 

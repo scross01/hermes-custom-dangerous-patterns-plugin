@@ -610,3 +610,133 @@ def test_load_yaml_directory_merges_lists(tmp_path):
     assert len(result["patterns"]) == 2
     assert result["patterns"][0]["description"] == "Vultr CLI"
     assert result["patterns"][1]["description"] == "AWS CLI"
+
+
+# ---------------------------------------------------------------------------
+# Combined mode: file + sibling .d/ directory)
+# ---------------------------------------------------------------------------
+
+
+def test_load_yaml_combined_sibling_file_and_dir(tmp_path):
+    """Directory mode with a sibling .yaml file merges both locations.
+
+    Both ~/.hermes/custom-dangerous-patterns.yaml and
+    ~/.hermes/custom-dangerous-patterns.d/ exist. The sibling file's
+    entries form the baseline; directory files are merged on top.
+    """
+    from config import _load_yaml
+
+    # Create the sibling .yaml file
+    sibling = tmp_path / "custom-dangerous-patterns.yaml"
+    sibling.write_text(
+        "patterns:\n"
+        "  - pattern: '\\\\bvultr\\\\b'\n"
+        "    description: 'Vultr CLI (from file)'\n"
+        "allow_patterns: []\n"
+        "deny_patterns: []\n",
+        encoding="utf-8",
+    )
+
+    # Create the .d/ directory with its own patterns
+    d = tmp_path / "custom-dangerous-patterns.d"
+    d.mkdir()
+    (d / "10-cloud.yaml").write_text(
+        "patterns:\n"
+        "  - pattern: '\\\\baws\\\\b'\n"
+        "    description: 'AWS CLI (from dir)'\n"
+        "allow_patterns:\n"
+        "  - pattern: '\\\\baws\\\\s+info\\\\b'\n"
+        "    description: 'AWS info (from dir)'\n",
+        encoding="utf-8",
+    )
+
+    result = _load_yaml(d)
+    assert result is not None
+    # Should have patterns from both locations
+    assert len(result["patterns"]) == 2
+    descriptions = {e["description"] for e in result["patterns"]}
+    assert "Vultr CLI (from file)" in descriptions
+    assert "AWS CLI (from dir)" in descriptions
+    # allow_patterns from dir only
+    assert len(result["allow_patterns"]) == 1
+    assert result["allow_patterns"][0]["description"] == "AWS info (from dir)"
+
+
+def test_load_yaml_combined_dir_overrides_file_on_dedup(tmp_path):
+    """When the same pattern exists in both file and dir, dir wins (last)."""
+    from config import _load_yaml
+
+    # Sibling file has the pattern enabled
+    sibling = tmp_path / "custom-dangerous-patterns.yaml"
+    sibling.write_text(
+        "patterns:\n"
+        "  - pattern: '\\\\bduplicate\\\\b'\n"
+        "    description: 'Duplicate (from file)'\n"
+        "    enabled: true\n",
+        encoding="utf-8",
+    )
+
+    # Directory has the same pattern but disabled
+    d = tmp_path / "custom-dangerous-patterns.d"
+    d.mkdir()
+    (d / "99-custom.yaml").write_text(
+        "patterns:\n"
+        "  - pattern: '\\\\bduplicate\\\\b'\n"
+        "    description: 'Duplicate (from dir)'\n"
+        "    enabled: false\n",
+        encoding="utf-8",
+    )
+
+    result = _load_yaml(d)
+    assert result is not None
+    assert len(result["patterns"]) == 1
+    # Dir entry wins (last occurrence)
+    assert result["patterns"][0]["description"] == "Duplicate (from dir)"
+    assert result["patterns"][0]["enabled"] is False
+
+
+def test_load_yaml_combined_dir_only_no_sibling(tmp_path):
+    """Directory mode without a sibling file loads only the directory."""
+    from config import _load_yaml
+
+    d = tmp_path / "custom-dangerous-patterns.d"
+    d.mkdir()
+    (d / "10-test.yaml").write_text(
+        "patterns:\n"
+        "  - pattern: '\\\\btest\\\\b'\n"
+        "    description: 'Test pattern'\n",
+        encoding="utf-8",
+    )
+
+    result = _load_yaml(d)
+    assert result is not None
+    assert len(result["patterns"]) == 1
+    assert result["patterns"][0]["description"] == "Test pattern"
+
+
+def test_resolve_config_path_combined_mode(tmp_path, monkeypatch):
+    """When both file and dir exist, resolve_config_path returns the dir."""
+    import types
+
+    # Create sibling file
+    (tmp_path / "custom-dangerous-patterns.yaml").write_text(
+        "patterns: []\n", encoding="utf-8"
+    )
+    # Create sibling dir
+    (tmp_path / "custom-dangerous-patterns.d").mkdir()
+    (tmp_path / "custom-dangerous-patterns.d" / "test.yaml").write_text(
+        "patterns: []\n", encoding="utf-8"
+    )
+
+    mock_constants = types.ModuleType("hermes_constants")
+    mock_constants.get_hermes_home = lambda: tmp_path
+    monkeypatch.setitem(sys.modules, "hermes_constants", mock_constants)
+
+    # Clear cached config path by reimporting
+    import config as cfg_mod
+    monkeypatch.setitem(sys.modules, "config", cfg_mod)
+    from config import _resolve_config_path
+
+    result = _resolve_config_path()
+    # In combined mode, directory is returned so writes go to 99-custom.yaml
+    assert result == tmp_path / "custom-dangerous-patterns.d"
