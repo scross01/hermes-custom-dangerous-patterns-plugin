@@ -14,10 +14,14 @@
     - **`validate`** — Validate config syntax and regexes (supports `--quiet` for CI)
     - **`info`** — Dashboard showing plugin state, integrity, groups, protected patterns
     - **`logs`** — Extract plugin-specific log entries from Hermes logs
-    - **`add / remove`** — Add/remove patterns interactively or via CLI flags
+    - **`add`** — Add patterns interactively or via CLI flags
+    - **`remove`** — Remove patterns interactively or by index/description
     - `--dry-run` flag on all write commands for previewing changes
     - `list --builtins` for viewing Hermes built-in patterns
     - `test --skip-builtins` to focus on custom patterns only
+    - `add --glob` for glob-style pattern entry (converted to regex automatically)
+    - `add --target <filename>` to write directly to a specific `.yaml` file in the config directory
+    - `remove --force` to skip the confirmation prompt
 
 ## 0.2.0
 

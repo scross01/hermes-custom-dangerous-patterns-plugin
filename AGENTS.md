@@ -209,7 +209,9 @@ test_p.set_defaults(func=_handle_test)
 
 - CLI commands load config fresh each invocation (`load_config(force=True, integrity_check=False)`). They bypass the module-level cache.
 - Write commands (`enable`, `disable`, `add`, `remove`) modify the YAML config on disk and remind the user to restart Hermes.
-- **Directory mode writes to `99-custom.yaml`.** When the config path is a directory, write commands never touch user-created files. Instead, they write the full merged config to a dedicated `99-custom.yaml` file that sorts last in the merge order (highest precedence). This avoids pattern duplication on reload.
+- **Directory mode delta writes.** When the config path is a directory, most write commands (`enable`, `disable`, `add` without `--target`) never touch user-created files. Instead, `save_config()` computes a delta and writes only changed entries to `99-custom.yaml`, which sorts last in the merge order.
+- **`add --target <filename>`** writes directly to the specified file in the config directory (skips `save_config` delta). The file must have a `.yaml` extension; path separators are not allowed.
+- **`remove` always edits source files directly.** Unlike other write commands, `remove` uses `remove_entry_from_file()` to scan all YAML files and delete matching pattern entries at the YAML level. No `disabled: true` remnant is written.
 - The `test` command uses the same `patterns.py` matching functions as the runtime monkey-patches, guaranteeing consistent results.
 - CLI commands are invoked by Hermes's plugin CLI system but still use the same relative import convention as the rest of the plugin (`from .config import ...`, `from .patterns import ...`).
 
@@ -217,11 +219,25 @@ test_p.set_defaults(func=_handle_test)
 
 When the config path is a directory, CLI write commands (`add`, `remove`, `enable`, `disable`) behave differently:
 
-1. **Never touch user-created files.** Files like `10-cloud.yaml` and `20-database.yaml` are read-only as far as CLI commands are concerned.
+1. **Never touch user-created files (except `remove` and `add --target`).** Files like `10-cloud.yaml` and `20-database.yaml` are read-only as far as `enable`, `disable`, and `add` (without `--target`) are concerned. `remove` always edits source files directly to delete entries.
 2. **Delta-only writes.** `save_config()` computes a delta between the merged config and the user file baseline. Only entries that differ — new, modified, or removed — are written to `99-custom.yaml`.
-3. **Removal as disabled.** When a pattern is removed via CLI, the delta writes it to `99-custom.yaml` with `enabled: False` so the removal persists across reloads.
-4. **Deduplication on reload.** During directory loading, `_load_yaml()` deduplicates pattern entries by regex key, keeping the last occurrence (later files win). This ensures `99-custom.yaml`'s `enabled: False` correctly overrides the user file's `enabled: True` without duplication.
-5. **To reset CLI-managed patterns**, delete `99-custom.yaml`.
+3. **Removal as true deletion.** When a pattern is removed via CLI, `remove_entry_from_file()` scans all YAML files (including the sibling `.yaml` in combined mode) and deletes matching pattern entries using ruamel.yaml round-trip editing. The lines are gone — no disabled remnant or `_removed` flag is written.
+4. **`add --target <filename>` writes directly.** When `--target` is specified, `append_to_yaml_file()` writes the entry directly to the specified file (creating it if needed), skipping `save_config` entirely.
+5. **Deduplication on reload.** During directory loading, `_load_yaml()` deduplicates pattern entries by regex key, keeping the last occurrence (later files win). This ensures `99-custom.yaml`'s `enabled: False` correctly overrides the user file's `enabled: True` without duplication.
+6. **To reset CLI-managed patterns**, delete `99-custom.yaml`.
+
+### `remove --force` and confirmation
+
+The `remove` command requests a confirmation prompt before deleting:
+
+| Usage | Behavior |
+|-------|----------|
+| `remove 3` | Shows matched pattern, asks `Remove this pattern? [y/N]`, deletes on `y` |
+| `remove 3 --force` | Skips confirmation, deletes immediately |
+| `remove 3 --dry-run` | Shows what would be removed without executing |
+| `remove 3 --force --dry-run` | `dry-run` takes precedence, shows would-remove message |
+
+Protected patterns cannot be removed via CLI regardless of `--force` — edit the config file directly.
 
 ### `init` command — config directory creation
 
@@ -232,9 +248,13 @@ setup**). The directory is created with starter files:
 - `00-test.yaml` — safe `[TEST]` patterns (all disabled)
 - `01-examples.yaml` — example patterns (only with `--with-examples`)
 
-CLI write operations (`add`, `remove`, `enable`, `disable`) write delta
-entries to `99-custom.yaml` inside the directory — user-created files are
-never modified.
+CLI write operations:
+- `enable` / `disable`: write delta entries to `99-custom.yaml`
+- `add` (without `--target`): writes delta entries to `99-custom.yaml`
+- `add --target <filename>`: writes directly to the specified file (must have `.yaml` extension)
+- `remove`: edits source files directly via ruamel.yaml round-trip deletion
+
+User-created files like `10-cloud.yaml` are never modified by `enable`, `disable`, or `add` (without `--target`).
 
 ### Glob-to-Regex Pattern Entry (`add --interactive` and `add --glob`)
 
@@ -278,6 +298,29 @@ examples:                      # only if provided
 ```
 
 **Non-interactive:** Use `--glob` instead of `--pattern`. Mutually exclusive — cannot specify both.
+
+### `add --target` — writing to a specific file
+
+The `add` command supports a `--target <filename>` flag to write the new
+pattern entry directly to a named file in the config directory, bypassing
+the `save_config` delta system.
+
+**Rules:**
+- Requires directory mode (config path must be a directory)
+- File name must end with `.yaml`
+- File name must not contain path separators (no `/`)
+- If the file doesn't exist, it is created
+- The entry is cleaned via `_clean_for_serialization` for proper YAML field order
+
+**Use case:** Organize patterns by tool or team:
+
+```bash
+hermes custom-dangerous-patterns add --target 10-cloud.yaml --type block \
+    --pattern '\\bvultr\\b' --description 'Vultr CLI' --group cloud
+
+hermes custom-dangerous-patterns add --target 20-database.yaml --type block \
+    --pattern '\\bDROP\\s+DATABASE\\b' --description 'SQL DROP' --group database
+```
 
 ### Adding a new subcommand
 

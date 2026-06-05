@@ -70,7 +70,7 @@ Then enable:
 hermes plugins enable custom-dangerous-patterns
 ```
 
-### Step 2: Create the config file
+### Step 2: Create the config
 
 Easiest — use the interactive bootstrap:
 
@@ -78,16 +78,18 @@ Easiest — use the interactive bootstrap:
 hermes custom-dangerous-patterns init --with-examples
 ```
 
-This creates `~/.hermes/custom-dangerous-patterns.yaml` with example patterns (all enabled for demonstration). Without `--with-examples`, creates a minimal config with safe test patterns (all disabled).
+This creates `~/.hermes/custom-dangerous-patterns/` (a directory) with:
+- `00-test.yaml` — safe `[TEST]` patterns (all disabled)
+- `01-examples.yaml` — fully-enabled example patterns (only with `--with-examples`)
 
-Or manually:
+Without `--with-examples`, creates a minimal config directory with safe test patterns (all disabled).
 
-```bash
-cp ~/.hermes/plugins/custom-dangerous-patterns/examples/01-examples.yaml \
-   ~/.hermes/custom-dangerous-patterns.yaml
-```
+Or create `~/.hermes/custom-dangerous-patterns/` manually — see [Configuration](#configuration).
 
-Or create `~/.hermes/custom-dangerous-patterns.yaml` manually (see [Configuration](#configuration)).
+> **Note:** Directory mode is the **preferred** configuration setup.
+> The plugin also supports a single `custom-dangerous-patterns.yaml` file
+> or *combined mode* where both the directory and sibling `.yaml` file are
+> loaded and merged together.
 
 ### Step 3: Restart Hermes
 
@@ -122,16 +124,40 @@ Then try it live:
 
 ## Configuration
 
-### Config File Location
+### Config Location
+
+**Directory (preferred):**
+
+```
+~/.hermes/custom-dangerous-patterns/
+```
+
+All `*.yaml` files in the directory are loaded and merged alphabetically.
+Most CLI write commands (`enable`, `disable`, `add` without `--target`)
+write delta entries to `99-custom.yaml` — user-created files are never
+modified.
+
+Two exceptions:
+- **`remove`** deletes entries directly from source YAML files
+- **`add --target <filename>`** writes to the specified file
+
+**Single file (fallback):**
 
 ```
 ~/.hermes/custom-dangerous-patterns.yaml
 ```
 
+**Combined mode:** When both the directory and the sibling `.yaml` file
+exist, both are loaded and merged (directory files take precedence via
+dedup).
+
 Override with env var:
 
 ```bash
-export HERMES_CUSTOM_PATTERNS_PATH=/path/to/custom-dangerous-patterns.yaml
+export HERMES_CUSTOM_PATTERNS_PATH=/path/to/config.yaml
+
+# Or point to a directory:
+export HERMES_CUSTOM_PATTERNS_PATH=/path/to/config-directory/
 ```
 
 ### Block Patterns
@@ -267,7 +293,7 @@ These integrity checks provide defense-in-depth against unauthorized config tamp
 
 ### Directory Config Loading
 
-Instead of a single file, you can set your config path to a **directory**. When the path is a directory, the plugin loads all `*.yaml` files in alphabetical order and merges them:
+Instead of a single file, you can use a **directory**. The plugin loads all `*.yaml` files in alphabetical order and merges them:
 
 - Lists (`patterns`, `allow_patterns`, `deny_patterns`) are **extended** (appended)
 - Scalars override previous values
@@ -275,13 +301,14 @@ Instead of a single file, you can set your config path to a **directory**. When 
 This is useful for splitting configs by tool or team:
 
 ```bash
-~/.hermes/custom-patterns.d/
+~/.hermes/custom-dangerous-patterns/
 ├── 10-cloud.yaml       # cloud CLI patterns
 ├── 20-database.yaml     # database patterns
 └── 30-deployment.yaml   # deploy tool patterns
 ```
 
-Set the directory path via `$HERMES_CUSTOM_PATTERNS_PATH` or symlink the config path to a directory.
+Use `hermes custom-dangerous-patterns init` to create a config directory
+with starter files, or set the directory path via `$HERMES_CUSTOM_PATTERNS_PATH`.
 
 ### Full Example
 
@@ -441,6 +468,9 @@ hermes custom-dangerous-patterns enable --group cloud               # all patter
 hermes custom-dangerous-patterns enable --group testing --dry-run   # preview without saving
 ```
 
+With no target or group specified, `enable` and `disable` launch
+interactive selection automatically.
+
 After any write command, the CLI reminds you to restart Hermes for changes to take effect.
 
 ### `validate` — Check config syntax
@@ -471,24 +501,81 @@ hermes custom-dangerous-patterns logs --since 2026-06-01       # entries since a
 hermes custom-dangerous-patterns logs --follow                 # tail the log (Ctrl+C to exit)
 ```
 
-### `add / remove` — Manage patterns
+### `add` — Add a pattern
 
-Interactive guided entry or CLI flags for scripting.
+Interactive guided prompts or CLI flags for scripting.
 
 ```bash
-# Interactive (guided prompts for each field)
-hermes custom-dangerous-patterns add --interactive
-hermes custom-dangerous-patterns remove --interactive
+# Interactive (guided prompts for each field, with glob-to-regex support)
+hermes custom-dangerous-patterns add
 
-# Non-interactive (for scripting)
-hermes custom-dangerous-patterns add --type block \
+# Write to a specific file in the config directory
+hermes custom-dangerous-patterns add --target 02-mycloud.yaml --type block \
     --pattern '\bheroku\s+(apps:destroy|pg:reset)\b' \
     --description 'Heroku destructive commands' \
     --group cloud
 
-hermes custom-dangerous-patterns remove 13 --type block
-hermes custom-dangerous-patterns remove "Heroku" --type block --dry-run
+# Glob-style pattern entry (converted to regex automatically)
+hermes custom-dangerous-patterns add --type block \
+    --glob 'heroku *destroy*' \
+    --description 'Heroku destructive commands'
+
+# Non-interactive (full CLI flags)
+hermes custom-dangerous-patterns add --type block \
+    --pattern '\bheroku\s+(apps:destroy|pg:reset)\b' \
+    --description 'Heroku destructive commands' \
+    --group cloud
 ```
+
+| Flag | Description |
+|------|-------------|
+| `-t` / `--type` | Pattern type: `block`, `allow`, or `deny` (required non-interactive) |
+| `-p` / `--pattern` | Raw regex pattern (required non-interactive; mutually exclusive with `--glob`) |
+| `--glob` | Glob-style pattern like `echo hello` — converted to regex automatically |
+| `-d` / `--description` | Human-readable description |
+| `-g` / `--group` | Optional group tag for categorization |
+| `--examples` | One or more example commands |
+| `--disabled` | Add as disabled (default: enabled) |
+| `--protected` | Mark as protected (integrity tracked across sessions) |
+| `--dry-run` | Preview without saving |
+| `--target FILENAME` | Write to a specific `.yaml` file in the config directory (requires directory mode) |
+
+> **Note:** `--pattern` and `--glob` are mutually exclusive. Without any
+> flags, `add` launches interactive mode with guided prompts and
+> glob-to-regex conversion.
+
+### `remove` — Remove a pattern
+
+```bash
+# Interactive (shows numbered list)
+hermes custom-dangerous-patterns remove
+
+# By index (from `list` output)
+hermes custom-dangerous-patterns remove 3
+
+# By description substring
+hermes custom-dangerous-patterns remove "Heroku"
+
+# Force removal without confirmation prompt
+hermes custom-dangerous-patterns remove 3 --force
+
+# Preview without deleting
+hermes custom-dangerous-patterns remove 7 --dry-run
+```
+
+| Flag | Description |
+|------|-------------|
+| `target` | Pattern index (from `list`) or description substring |
+| `-t` / `--type` | Filter by type: `block`, `allow`, or `deny` |
+| `--force` | Skip confirmation prompt |
+| `--dry-run` | Preview without deleting |
+
+Unlike `enable`/`disable` (which write delta entries to `99-custom.yaml`),
+**`remove` truly deletes the pattern** from the source YAML file — the
+lines are removed, no remnant written.
+
+Protected patterns cannot be removed via CLI; edit the config file
+directly to remove them.
 
 ---
 
