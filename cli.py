@@ -275,51 +275,24 @@ def _check_builtins_for_test(
 def cmd_init(
     with_examples: bool = False,
     force: bool = False,
-    mode: str | None = None,
 ) -> tuple[str, int]:
-    """Create a starter config file or directory and guide the user.
+    """Create a starter config directory and guide the user.
 
-    All example patterns are DISABLED by default — the user must
-    review and enable the ones they want. Use --with-examples for
+    Creates ~/.hermes/custom-dangerous-patterns/ (a directory) with
+    starter patterns. All patterns are DISABLED by default — the user
+    must review and enable the ones they want. Use --with-examples for
     a fully-enabled demonstration config.
 
     Args:
         with_examples: Include fully-enabled example patterns.
         force: Overwrite existing config without asking.
-        mode: ``"file"`` for single file, ``"dir"`` for directory,
-              or ``None`` to prompt interactively when neither exists.
     """
-    from .config import resolve_config_path, save_config
+    from .config import resolve_config_path
 
-    # Get the resolved default config path (~/.hermes/custom-dangerous-patterns.yaml)
+    # Always use directory mode
     config_path = resolve_config_path()
-    dir_path = config_path.parent / "custom-dangerous-patterns.d"
-
-    # Resolve mode: explicit flag, existing location, or interactive prompt
-    if mode is None:
-        if config_path.exists():
-            mode = "file"
-        elif dir_path.exists():
-            config_path = dir_path
-            mode = "dir"
-        else:
-            print()
-            print("Config location:")
-            print("  [1] Single file (~/.hermes/custom-dangerous-patterns.yaml)")
-            print("  [2] Config directory (~/.hermes/custom-dangerous-patterns.d/)")
-            try:
-                choice = input("Choose [1]: ").strip() or "1"
-            except (EOFError, KeyboardInterrupt):
-                return ("\nCancelled.\n", 1)
-            mode = "file" if choice == "1" else "dir"
-            if mode == "dir":
-                config_path = dir_path
-            else:
-                config_path = config_path.parent / "custom-dangerous-patterns.yaml"
-    elif mode == "dir":
-        config_path = dir_path
-    elif mode == "file":
-        config_path = config_path.parent / "custom-dangerous-patterns.yaml"
+    dir_path = config_path.parent / "custom-dangerous-patterns"
+    config_path = dir_path
 
     # Check if config already exists
     if config_path.exists():
@@ -341,39 +314,35 @@ def cmd_init(
     allow_count = len(config_dict.get("allow_patterns", []))
     deny_count = len(config_dict.get("deny_patterns", []))
 
-    if mode == "dir":
-        config_path.mkdir(parents=True, exist_ok=True)
+    config_path.mkdir(parents=True, exist_ok=True)
 
-        if with_examples:
-            # Write test patterns (always disabled) to 00-test.yaml
-            test_config = _build_minimal_starter_config()
-            _write_init_yaml(test_config, config_path / "00-test.yaml")
+    if with_examples:
+        # Write test patterns (always disabled) to 00-test.yaml
+        test_config = _build_minimal_starter_config()
+        _write_init_yaml(test_config, config_path / "00-test.yaml")
 
-            saved_files = ["00-test.yaml"]
+        saved_files = ["00-test.yaml"]
 
-            # Write example patterns (fully enabled) to 01-examples.yaml.
-            # Guard against the fallback case where _load_example_config returns
-            # the test config (example file not found) — skip to avoid duplicates.
-            is_fallback = (
-                config_dict.get("patterns", []) == test_config.get("patterns", [])
-                and config_dict.get("deny_patterns", []) == test_config.get("deny_patterns", [])
-            )
-            if not is_fallback:
-                _write_init_yaml(config_dict, config_path / "01-examples.yaml")
-                saved_files.append("01-examples.yaml")
-                # Add test pattern counts to the example counts already tallied
-                block_count += len(test_config.get("patterns", []))
-                allow_count += len(test_config.get("allow_patterns", []))
-                deny_count += len(test_config.get("deny_patterns", []))
-        else:
-            target = config_path / "00-test.yaml"
-            _write_init_yaml(config_dict, target)
-            saved_files = ["00-test.yaml"]
-
-        saved_display = f"{config_path}/ ({', '.join(saved_files)})"
+        # Write example patterns (fully enabled) to 01-examples.yaml.
+        # Guard against the fallback case where _load_example_config returns
+        # the test config (example file not found) — skip to avoid duplicates.
+        is_fallback = (
+            config_dict.get("patterns", []) == test_config.get("patterns", [])
+            and config_dict.get("deny_patterns", []) == test_config.get("deny_patterns", [])
+        )
+        if not is_fallback:
+            _write_init_yaml(config_dict, config_path / "01-examples.yaml")
+            saved_files.append("01-examples.yaml")
+            # Add test pattern counts to the example counts already tallied
+            block_count += len(test_config.get("patterns", []))
+            allow_count += len(test_config.get("allow_patterns", []))
+            deny_count += len(test_config.get("deny_patterns", []))
     else:
-        save_config(config_dict, config_path)
-        saved_display = str(config_path)
+        target = config_path / "00-test.yaml"
+        _write_init_yaml(config_dict, target)
+        saved_files = ["00-test.yaml"]
+
+    saved_display = f"{config_path}/ ({', '.join(saved_files)})"
 
     lines = [
         f"Created: {saved_display} ({block_count} block, {allow_count} allow, "
@@ -483,10 +452,11 @@ def cmd_enable(
     pattern_type: str | None = None,
     group: str | None = None,
     dry_run: bool = False,
+    interactive: bool = False,
 ) -> tuple[str, int]:
     """Enable patterns by index, description, or group."""
     return _toggle_patterns(enable=True, target=target, pattern_type=pattern_type,
-                            group=group, dry_run=dry_run)
+                            group=group, dry_run=dry_run, interactive=interactive)
 
 
 def cmd_disable(
@@ -494,10 +464,11 @@ def cmd_disable(
     pattern_type: str | None = None,
     group: str | None = None,
     dry_run: bool = False,
+    interactive: bool = False,
 ) -> tuple[str, int]:
     """Disable patterns by index, description, or group."""
     return _toggle_patterns(enable=False, target=target, pattern_type=pattern_type,
-                            group=group, dry_run=dry_run)
+                            group=group, dry_run=dry_run, interactive=interactive)
 
 
 def _toggle_patterns(
@@ -506,6 +477,7 @@ def _toggle_patterns(
     pattern_type: str | None,
     group: str | None,
     dry_run: bool,
+    interactive: bool = False,
 ) -> tuple[str, int]:
     """Shared implementation for enable/disable commands."""
     from .config import load_config, resolve_config_path, save_config
@@ -532,6 +504,9 @@ def _toggle_patterns(
 
     if not all_entries:
         return ("No custom patterns defined. Nothing to change.\n", 1)
+
+    if interactive:
+        return _toggle_interactive(config, config_path, all_entries, enable, dry_run)
 
     # Find matching patterns
     matched: list[dict[str, Any]] = []
@@ -599,7 +574,11 @@ def _toggle_patterns(
     # Apply the toggle
     changed = []
     for entry in matched:
-        entry["enabled"] = new_state
+        if enable:
+            # Remove enabled key so it defaults to True (omitted from YAML output)
+            entry.pop("enabled", None)
+        else:
+            entry["enabled"] = False
         changed.append(entry)
 
     # Clean up _section marker before saving
@@ -614,6 +593,112 @@ def _toggle_patterns(
     lines.append("")
     lines.append(_config_update_reminder().strip())
     return ("\n".join(lines) + "\n", 0)
+
+
+def _toggle_interactive(
+    config: dict[str, Any],
+    config_path: Path,
+    all_entries: list[dict[str, Any]],
+    enable: bool,
+    dry_run: bool,
+) -> tuple[str, int]:
+    """Interactive enable/disable with numbered selection."""
+    from .config import save_config
+
+    action = "enable" if enable else "disable"
+    action_past = "enabled" if enable else "disabled"
+    new_state = True if enable else False
+
+    print()
+    print(f"Select pattern to {action}:")
+    print()
+
+    sections_order = [
+        ("patterns", "BLOCK patterns:"),
+        ("allow_patterns", "ALLOW patterns:"),
+        ("deny_patterns", "DENY patterns:"),
+    ]
+
+    for section_key, label in sections_order:
+        entries = [e for e in all_entries if e["_section"] == section_key]
+        if not entries:
+            continue
+        print(label)
+        for e in entries:
+            idx = get_index(e, all_entries)
+            is_enabled = e.get("enabled", True)
+            status = "\u2713" if is_enabled else "\u2717"
+            grp = e.get("group", "")
+            grp_str = f"  group: {grp}" if grp else ""
+            print(f"  [{idx}] {status} {e['description']}{grp_str}")
+        print()
+
+    try:
+        choice = input(f"Enter index to {action} (or 0 to cancel): ").strip()
+    except (EOFError, KeyboardInterrupt):
+        return ("\nCancelled.\n", 1)
+
+    try:
+        idx = int(choice)
+    except ValueError:
+        return (f"Invalid index: {choice}\n", 1)
+
+    if idx == 0:
+        return ("Cancelled.\n", 0)
+
+    if idx < 1 or idx > len(all_entries):
+        return (f"Invalid index: {idx}. Valid range: 1-{len(all_entries)}\n", 1)
+
+    entry = all_entries[idx - 1]
+
+    # Check protected (only on disable)
+    if not enable and entry.get("protected"):
+        return (
+            f"Pattern [{idx}] \"{entry['description']}\" is protected.\n"
+            f"Edit the config file directly to modify protected patterns.\n",
+            1,
+        )
+
+    # Check if already in desired state
+    already = entry.get("enabled", True) == new_state
+    if already:
+        return (f"Pattern [{idx}] \"{entry['description']}\" is already {action_past}.\n", 0)
+
+    type_label = entry["_section"].replace("_patterns", "").upper()
+    print(f"\nYou selected: [{idx}] \"{entry['description']}\" ({type_label})")
+
+    try:
+        confirm = input(f"{action.capitalize()} this pattern? [y/N]: ").strip().lower()
+    except (EOFError, KeyboardInterrupt):
+        return ("\nCancelled.\n", 1)
+
+    if confirm != "y":
+        return ("Cancelled.\n", 0)
+
+    if dry_run:
+        return (
+            f"Would {action} {type_label} pattern [{idx}]: "
+            f"\"{entry['description']}\"\n"
+            f"Use without --dry-run to confirm.\n",
+            0,
+        )
+
+    # Apply the toggle
+    if enable:
+        # Remove enabled key so it defaults to True (omitted from YAML output)
+        entry.pop("enabled", None)
+    else:
+        entry["enabled"] = False
+
+    _cleanup_sections(all_entries)
+    save_config(config, config_path)
+
+    return (
+        f"\u2713 {action_past.capitalize()} {type_label} pattern [{idx}]: "
+        f"\"{entry['description']}\"\n"
+        f"{_config_update_reminder()}",
+        0,
+    )
 
 
 def cmd_validate(
@@ -1375,7 +1460,6 @@ def _handle_init(args: Any) -> None:
     output, exit_code = cmd_init(
         with_examples=getattr(args, "with_examples", False),
         force=getattr(args, "force", False),
-        mode=getattr(args, "mode", None),
     )
     _emit(output, exit_code)
 
@@ -1386,6 +1470,7 @@ def _handle_enable(args: Any) -> None:
         pattern_type=getattr(args, "type", None),
         group=getattr(args, "group", None),
         dry_run=getattr(args, "dry_run", False),
+        interactive=getattr(args, "interactive", False),
     )
     _emit(output, exit_code)
 
@@ -1396,6 +1481,7 @@ def _handle_disable(args: Any) -> None:
         pattern_type=getattr(args, "type", None),
         group=getattr(args, "group", None),
         dry_run=getattr(args, "dry_run", False),
+        interactive=getattr(args, "interactive", False),
     )
     _emit(output, exit_code)
 
@@ -1620,10 +1706,6 @@ def register_cli(subparser: argparse.ArgumentParser) -> None:
         "-f", "--force", action="store_true",
         help="Overwrite existing config",
     )
-    init_p.add_argument(
-        "--mode", choices=["file", "dir"], default=None,
-        help="Config mode: single file or directory (default: prompt interactively)",
-    )
     init_p.set_defaults(func=_handle_init)
 
     # -- enable --
@@ -1631,6 +1713,10 @@ def register_cli(subparser: argparse.ArgumentParser) -> None:
     enable_p.add_argument(
         "target", nargs="?", default=None,
         help="Pattern index or description substring",
+    )
+    enable_p.add_argument(
+        "-i", "--interactive", action="store_true",
+        help="Interactive selection",
     )
     enable_p.add_argument(
         "-t", "--type", dest="type",
@@ -1649,6 +1735,10 @@ def register_cli(subparser: argparse.ArgumentParser) -> None:
     disable_p.add_argument(
         "target", nargs="?", default=None,
         help="Pattern index or description substring",
+    )
+    disable_p.add_argument(
+        "-i", "--interactive", action="store_true",
+        help="Interactive selection",
     )
     disable_p.add_argument(
         "-t", "--type", dest="type",

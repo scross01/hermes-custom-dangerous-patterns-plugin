@@ -624,7 +624,7 @@ def test_load_yaml_combined_sibling_file_and_dir(tmp_path):
     """Directory mode with a sibling .yaml file merges both locations.
 
     Both ~/.hermes/custom-dangerous-patterns.yaml and
-    ~/.hermes/custom-dangerous-patterns.d/ exist. The sibling file's
+    ~/.hermes/custom-dangerous-patterns/ exist. The sibling file's
     entries form the baseline; directory files are merged on top.
     """
     from config import _load_yaml
@@ -641,7 +641,7 @@ def test_load_yaml_combined_sibling_file_and_dir(tmp_path):
     )
 
     # Create the .d/ directory with its own patterns
-    d = tmp_path / "custom-dangerous-patterns.d"
+    d = tmp_path / "custom-dangerous-patterns"
     d.mkdir()
     (d / "10-cloud.yaml").write_text(
         "patterns:\n"
@@ -680,7 +680,7 @@ def test_load_yaml_combined_dir_overrides_file_on_dedup(tmp_path):
     )
 
     # Directory has the same pattern but disabled
-    d = tmp_path / "custom-dangerous-patterns.d"
+    d = tmp_path / "custom-dangerous-patterns"
     d.mkdir()
     (d / "99-custom.yaml").write_text(
         "patterns:\n"
@@ -702,7 +702,7 @@ def test_load_yaml_combined_dir_only_no_sibling(tmp_path):
     """Directory mode without a sibling file loads only the directory."""
     from config import _load_yaml
 
-    d = tmp_path / "custom-dangerous-patterns.d"
+    d = tmp_path / "custom-dangerous-patterns"
     d.mkdir()
     (d / "10-test.yaml").write_text(
         "patterns:\n"
@@ -726,8 +726,8 @@ def test_resolve_config_path_combined_mode(tmp_path, monkeypatch):
         "patterns: []\n", encoding="utf-8"
     )
     # Create sibling dir
-    (tmp_path / "custom-dangerous-patterns.d").mkdir()
-    (tmp_path / "custom-dangerous-patterns.d" / "test.yaml").write_text(
+    (tmp_path / "custom-dangerous-patterns").mkdir()
+    (tmp_path / "custom-dangerous-patterns" / "test.yaml").write_text(
         "patterns: []\n", encoding="utf-8"
     )
 
@@ -742,4 +742,4 @@ def test_resolve_config_path_combined_mode(tmp_path, monkeypatch):
 
     result = _resolve_config_path()
     # In combined mode, directory is returned so writes go to 99-custom.yaml
-    assert result == tmp_path / "custom-dangerous-patterns.d"
+    assert result == tmp_path / "custom-dangerous-patterns"

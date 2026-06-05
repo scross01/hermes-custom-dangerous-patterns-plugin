@@ -2,6 +2,10 @@
 
 ## 0.3.0
 
+- **BREAKING:** Config directory renamed from `custom-dangerous-patterns.d/` to `custom-dangerous-patterns/`. If you have an existing `.d/` directory, rename it manually:
+  ```bash
+  mv ~/.hermes/custom-dangerous-patterns.d ~/.hermes/custom-dangerous-patterns
+  ```
 - Added — `hermes custom-dangerous-patterns` CLI
     - **`list`** — List all custom patterns with filtering by type, group, search, status
     - **`test <command>`** — Test a command against all pattern types (deny, allow, block, built-in)

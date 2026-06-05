@@ -306,11 +306,11 @@ class TestFileMode:
 
 
 class TestDirMode:
-    """Test CLI commands against a directory-mode config (custom-dangerous-patterns.d/)."""
+    """Test CLI commands against a directory-mode config (custom-dangerous-patterns/)."""
 
     @staticmethod
     def dir_path(hermes_home: Path) -> Path:
-        return hermes_home / "custom-dangerous-patterns.d"
+        return hermes_home / "custom-dangerous-patterns"
 
     @staticmethod
     def source_file(hermes_home: Path, name: str = "00-test.yaml") -> Path:
@@ -500,11 +500,11 @@ class TestDirMode:
 
 
 class TestCombinedMode:
-    """Test CLI commands when both .yaml file and .d/ directory exist."""
+    """Test CLI commands when both .yaml file and directory exist."""
 
     @staticmethod
     def dir_path(hermes_home: Path) -> Path:
-        return hermes_home / "custom-dangerous-patterns.d"
+        return hermes_home / "custom-dangerous-patterns"
 
     @staticmethod
     def yaml_path(hermes_home: Path) -> Path:
@@ -519,7 +519,7 @@ class TestCombinedMode:
         yaml_config: dict[str, Any],
         dir_files: dict[str, dict[str, Any]],
     ) -> None:
-        """Set up both a .yaml file and a .d/ directory with files."""
+        """Set up both a .yaml file and a directory with files."""
         _write_yaml(self.yaml_path(hermes_home), yaml_config)
         d = self.dir_path(hermes_home)
         d.mkdir(parents=True, exist_ok=True)

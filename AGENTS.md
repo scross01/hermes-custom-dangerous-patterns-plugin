@@ -134,13 +134,13 @@ print('Allow match:', is_allow_pattern('vultr instance list'))
 ## Config path resolution
 
 1. `$HERMES_CUSTOM_PATTERNS_PATH` env var
-2. `~/.hermes/custom-dangerous-patterns.yaml` (single file)
-3. `~/.hermes/custom-dangerous-patterns.d/` (directory of YAML files)
+2. `~/.hermes/custom-dangerous-patterns/` (directory of YAML files — **preferred**)
+3. `~/.hermes/custom-dangerous-patterns.yaml` (single file, fallback)
 
 ### Combined mode
 
 When **both** the single file (`custom-dangerous-patterns.yaml`) and the directory
-(`custom-dangerous-patterns.d/`) exist, the plugin automatically enters
+(`custom-dangerous-patterns/`) exist, the plugin automatically enters
 *combined mode*:
 
 - **Loading:** `_load_yaml()` loads the sibling `.yaml` file first as a
@@ -154,7 +154,7 @@ When **both** the single file (`custom-dangerous-patterns.yaml`) and the directo
 
 This allows a gradual migration from single-file mode to directory mode:
 leave `custom-dangerous-patterns.yaml` in place and create
-`custom-dangerous-patterns.d/` alongside it. Both are merged automatically.
+`custom-dangerous-patterns/` alongside it. Both are merged automatically.
 
 ## CLI architecture
 
@@ -223,23 +223,18 @@ When the config path is a directory, CLI write commands (`add`, `remove`, `enabl
 4. **Deduplication on reload.** During directory loading, `_load_yaml()` deduplicates pattern entries by regex key, keeping the last occurrence (later files win). This ensures `99-custom.yaml`'s `enabled: False` correctly overrides the user file's `enabled: True` without duplication.
 5. **To reset CLI-managed patterns**, delete `99-custom.yaml`.
 
-### `init` command — multi-mode config creation
+### `init` command — config directory creation
 
-The `init` command now supports choosing between single-file and directory
-mode via `--mode {file,dir}`. When neither exists and no flag is given,
-the user is prompted interactively:
+The `init` command creates a config directory at
+`~/.hermes/custom-dangerous-patterns/` (directory mode is the **preferred
+setup**). The directory is created with starter files:
 
-```
-Config location:
-  [1] Single file (~/.hermes/custom-dangerous-patterns.yaml)
-  [2] Config directory (~/.hermes/custom-dangerous-patterns.d/)
-Choose [1]:
-```
+- `00-test.yaml` — safe `[TEST]` patterns (all disabled)
+- `01-examples.yaml` — example patterns (only with `--with-examples`)
 
-- **`--mode file`:** Creates `~/.hermes/custom-dangerous-patterns.yaml`.
-- **`--mode dir`:** Creates `~/.hermes/custom-dangerous-patterns.d/` and
-  writes the starter config to `99-custom.yaml` (or `99-examples.yaml` when
-  `--with-examples` is used).
+CLI write operations (`add`, `remove`, `enable`, `disable`) write delta
+entries to `99-custom.yaml` inside the directory — user-created files are
+never modified.
 
 ### Glob-to-Regex Pattern Entry (`add --interactive` and `add --glob`)
 

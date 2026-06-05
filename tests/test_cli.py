@@ -473,31 +473,29 @@ def test_cmd_test_skip_builtins(monkeypatch, cli_module, tmp_path):
 
 
 def test_cmd_init_creates_config(monkeypatch, cli_module, tmp_path):
-    """cmd_init creates a config file and returns success."""
+    """cmd_init creates a config directory and returns success."""
     config_path = tmp_path / "custom-dangerous-patterns.yaml"
     monkeypatch.setattr(
         sys.modules["hermes_plugins.config"],
         "resolve_config_path",
         lambda: config_path,
     )
-    monkeypatch.setattr(
-        sys.modules["hermes_plugins.config"],
-        "save_config",
-        lambda config_dict, path=None: config_path,
-    )
 
-    output, exit_code = cli_module.cmd_init(mode="file")
+    output, exit_code = cli_module.cmd_init()
     assert exit_code == 0
     assert "Created:" in output
     assert "Next steps:" in output
     assert "list" in output
     assert "enable --group" in output
+    # Should create the directory, not the file
+    assert (config_path.parent / "custom-dangerous-patterns").is_dir()
 
 
 def test_cmd_init_existing_config_no_force(monkeypatch, cli_module, tmp_path):
-    """cmd_init with existing config (no --force) returns error."""
+    """cmd_init with existing config dir (no --force) returns error."""
     config_path = tmp_path / "custom-dangerous-patterns.yaml"
-    config_path.write_text("patterns: []")
+    dir_path = tmp_path / "custom-dangerous-patterns"
+    dir_path.mkdir(parents=True, exist_ok=True)
     monkeypatch.setattr(
         sys.modules["hermes_plugins.config"],
         "resolve_config_path",
@@ -511,42 +509,38 @@ def test_cmd_init_existing_config_no_force(monkeypatch, cli_module, tmp_path):
 
 
 def test_cmd_init_force_overwrites(monkeypatch, cli_module, tmp_path):
-    """cmd_init --force overwrites existing config."""
+    """cmd_init --force overwrites existing config dir."""
     config_path = tmp_path / "custom-dangerous-patterns.yaml"
-    config_path.write_text("patterns: []")
+    dir_path = tmp_path / "custom-dangerous-patterns"
+    dir_path.mkdir(parents=True, exist_ok=True)
+    (dir_path / "old.yaml").write_text("patterns: []")
     monkeypatch.setattr(
         sys.modules["hermes_plugins.config"],
         "resolve_config_path",
         lambda: config_path,
-    )
-    monkeypatch.setattr(
-        sys.modules["hermes_plugins.config"],
-        "save_config",
-        lambda config_dict, path=None: config_path,
     )
 
     output, exit_code = cli_module.cmd_init(force=True)
     assert exit_code == 0
     assert "Created:" in output
+    # Should create the directory with 00-test.yaml
+    assert (dir_path / "00-test.yaml").is_file()
 
 
 def test_cmd_init_with_examples(monkeypatch, cli_module, tmp_path):
-    """cmd_init --with-examples creates config with example patterns."""
+    """cmd_init --with-examples creates config directory with example patterns."""
     config_path = tmp_path / "custom-dangerous-patterns.yaml"
     monkeypatch.setattr(
         sys.modules["hermes_plugins.config"],
         "resolve_config_path",
         lambda: config_path,
     )
-    monkeypatch.setattr(
-        sys.modules["hermes_plugins.config"],
-        "save_config",
-        lambda config_dict, path=None: config_path,
-    )
 
-    output, exit_code = cli_module.cmd_init(with_examples=True, mode="file")
+    output, exit_code = cli_module.cmd_init(with_examples=True)
     assert exit_code == 0
     assert "Created:" in output
+    dir_path = tmp_path / "custom-dangerous-patterns"
+    assert (dir_path / "00-test.yaml").is_file()
 
 
 def test_build_minimal_starter_config(cli_module):

@@ -41,7 +41,7 @@ def _resolve_config_path() -> Path:
     Resolution order:
       1. HERMES_CUSTOM_PATTERNS_PATH env var
       2. ~/.hermes/custom-dangerous-patterns.yaml (single file)
-      3. ~/.hermes/custom-dangerous-patterns.d/ (directory of YAML files)
+      3. ~/.hermes/custom-dangerous-patterns/ (directory of YAML files)
 
     When both the single file and the directory exist (combined mode),
     the directory is returned so that CLI write operations (add, remove,
@@ -59,7 +59,7 @@ def _resolve_config_path() -> Path:
         hermes_home = Path.home() / ".hermes"
 
     single_file = hermes_home / _DEFAULT_CONFIG_FILENAME
-    dir_path = hermes_home / "custom-dangerous-patterns.d"
+    dir_path = hermes_home / "custom-dangerous-patterns"
 
     # Combined mode: both exist — prefer dir for writes; loading merges both
     if single_file.is_file() and dir_path.is_dir():
@@ -112,7 +112,7 @@ def _load_yaml(path: Path) -> dict[str, Any] | None:
 
         # Combined mode: start by loading the sibling .yaml file as baseline
         # (e.g., ~/.hermes/custom-dangerous-patterns.yaml alongside
-        #  ~/.hermes/custom-dangerous-patterns.d/). Directory files are
+        #  ~/.hermes/custom-dangerous-patterns/). Directory files are
         # merged on top so they take precedence via dedup (last wins).
         sibling_file = path.parent / (path.stem + ".yaml")
         if sibling_file.is_file():
