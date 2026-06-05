@@ -549,12 +549,15 @@ def test_build_minimal_starter_config(cli_module):
     assert "patterns" in config
     assert "allow_patterns" in config
     assert "deny_patterns" in config
-    assert len(config["patterns"]) == 4
+    assert len(config["patterns"]) == 1
+    assert len(config["allow_patterns"]) == 1
     assert len(config["deny_patterns"]) == 1
     # All patterns should be disabled
     for entry in config["patterns"]:
         assert entry["enabled"] is False
     assert all(p["group"] == "testing" for p in config["patterns"])
+    assert all(p["group"] == "testing" for p in config["allow_patterns"])
+    assert all(p["group"] == "testing" for p in config["deny_patterns"])
 
 
 # ---------------------------------------------------------------------------

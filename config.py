@@ -71,7 +71,7 @@ def _resolve_config_path() -> Path:
     if dir_path.is_dir():
         return dir_path
 
-    return single_file  # return default even if missing (will log warning)
+    return dir_path  # return default even if missing (will log warning)
 
 
 def resolve_config_path() -> Path:
@@ -143,12 +143,13 @@ def _load_yaml(path: Path) -> dict[str, Any] | None:
         for key in ("patterns", "allow_patterns", "deny_patterns"):
             if key not in merged:
                 merged[key] = []
-        # Deduplicate pattern entries by key (later files win) so that
-        # removals written to 99-custom.yaml (enabled: False) correctly
-        # override matching entries from user-created files — without
-        # this, the same pattern appears once enabled and once disabled.
+    # Deduplicate pattern entries by key (later files win) so that
+    # removals written to 99-custom.yaml (enabled: False) correctly
+    # override matching entries from user-created files — without
+    # this, the same pattern appears once enabled and once disabled.
         for section in ("patterns", "allow_patterns", "deny_patterns"):
-            merged[section] = _dedup_entries(merged[section])
+            if section in merged:
+                merged[section] = _dedup_entries(merged[section])
         if merged:
             source_desc = f"{len(yaml_files)} files in {path}"
             if base:
@@ -581,8 +582,7 @@ def _compute_delta(
 
     Keys are compared by pattern regex string. Entries present in
     merged but not in user files are new. Entries with the same
-    pattern but different fields are modified. Entries removed
-    from user files (not in merged) are written with enabled=False
+    pattern but different fields are modified. Entries    removed from user files (not in merged) are written with enabled=False
     to prevent them from reappearing on reload.
     """
     delta: dict[str, list[dict[str, Any]]] = {}
@@ -667,6 +667,124 @@ def _clean_for_serialization(entries: list[dict[str, Any]]) -> list[dict[str, An
             out["examples"] = entry["examples"]
         cleaned.append(out)
     return cleaned
+
+
+def append_to_yaml_file(
+    entry: dict[str, Any],
+    file_path: Path,
+    section_key: str = "patterns",
+) -> None:
+    """Append a single pattern entry to a specific YAML file.
+
+    Loads the file with ruamel.yaml round-trip (preserving comments and
+    formatting), appends the entry to the appropriate section (controlled
+    by *section_key*), and writes back. If the file does not exist, creates
+    it with the required sections.
+
+    Used by ``add --target <filename>`` to write directly to a named file
+    in the config directory instead of going through ``save_config``.
+    """
+    from ruamel.yaml import YAML
+
+    try:
+        yaml = YAML()
+        yaml.indent(mapping=2, sequence=4, offset=2)
+        yaml.default_flow_style = False
+
+        if file_path.is_file():
+            raw = yaml.load(file_path.read_text(encoding="utf-8"))
+            if not isinstance(raw, dict):
+                raw = {}
+        else:
+            file_path.parent.mkdir(parents=True, exist_ok=True)
+            raw = {}
+
+        # Ensure section exists
+        if section_key not in raw or not isinstance(raw[section_key], list):
+            raw[section_key] = []
+
+        raw[section_key].append(entry)
+        yaml.dump(raw, file_path)
+    except Exception as exc:
+        raise OSError(f"Failed to write to {file_path}: {exc}") from exc
+
+
+def remove_entry_from_file(entry: dict[str, Any], config_path: Path) -> bool:
+    """Delete a pattern entry from ALL YAML files that contain it.
+
+    Scans every YAML file in the config directory (and the sibling
+    ``.yaml`` file in combined mode), finds the entry by regex pattern,
+    and removes all occurrences using ruamel.yaml round-trip loading
+    so comments and formatting are preserved.
+
+    This is the "true delete" for the CLI remove command — the pattern
+    is gone from every file, no remnant written.
+
+    Returns True if at least one occurrence was found and removed.
+    """
+    from ruamel.yaml import YAML
+
+    pattern_val = entry.get("pattern", "")
+    section_key = entry.get("_section", "patterns")
+
+    # Collect YAML files to scan (directory mode + combined mode sibling)
+    files_to_scan: list[Path] = []
+    if config_path.is_dir():
+        files_to_scan.extend(sorted(config_path.glob("*.yaml")))
+        # Combined mode: also scan the sibling .yaml file
+        sibling = config_path.parent / (config_path.stem + ".yaml")
+        if sibling.is_file():
+            files_to_scan.append(sibling)
+    elif config_path.is_file():
+        files_to_scan = [config_path]
+    else:
+        return False
+
+    yaml = YAML()
+    yaml.indent(mapping=2, sequence=4, offset=2)
+    yaml.default_flow_style = False
+
+    any_removed = False
+
+    for yf in files_to_scan:
+        try:
+            raw = yaml.load(yf.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        if not isinstance(raw, dict):
+            continue
+
+        section = raw.get(section_key)
+        if not isinstance(section, list):
+            continue
+
+        # Scan in reverse order so indices stay valid after deletions
+        removed_from_this_file = False
+        for i in range(len(section) - 1, -1, -1):
+            item = section[i]
+            if isinstance(item, dict) and item.get("pattern") == pattern_val:
+                del section[i]
+                removed_from_this_file = True
+                any_removed = True
+
+        if removed_from_this_file:
+            try:
+                yaml.dump(raw, yf)
+            except Exception:
+                pass  # Logged below if nothing was removed at all
+            logger.info(
+                "custom-dangerous-patterns: deleted pattern %r from %s",
+                pattern_val,
+                yf,
+            )
+
+    if not any_removed:
+        logger.warning(
+            "custom-dangerous-patterns: pattern %r not found in any YAML file",
+            pattern_val,
+        )
+
+    return any_removed
 
 
 # ---------------------------------------------------------------------------

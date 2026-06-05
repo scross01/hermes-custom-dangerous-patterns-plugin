@@ -1,0 +1,38 @@
+# Test patterns for Hermes custom-dangerous-patterns plugin.
+#
+# These patterns are deliberately safe and disabled by default.
+# Enable them to exercise the approval/blocking flow without
+# using real dangerous commands.
+#
+# Test these by enabling and running:
+#   hermes custom-dangerous-patterns enable --group testing
+#
+# The three patterns create a complete test matrix:
+#   - echo allow    → matches block + allow → allow wins → no prompt
+#   - echo deny     → matches deny           → blocked immediately
+#   - echo anything → matches block          → approval prompt
+
+patterns:
+  - pattern: '\becho\b'
+    description: '[TEST] Block any echo command'
+    enabled: false
+    group: testing
+    examples:
+      - 'echo hello'
+      - 'echo allow'
+
+allow_patterns:
+  - pattern: '\becho\s+allow\b'
+    description: '[TEST] Allow echo allow'
+    enabled: false
+    group: testing
+    examples:
+      - 'echo allow'
+
+deny_patterns:
+  - pattern: '\becho\s+deny\b'
+    description: '[TEST] Deny echo deny'
+    enabled: false
+    group: testing
+    examples:
+      - 'echo deny'

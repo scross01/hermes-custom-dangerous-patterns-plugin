@@ -83,7 +83,7 @@ This creates `~/.hermes/custom-dangerous-patterns.yaml` with example patterns (a
 Or manually:
 
 ```bash
-cp ~/.hermes/plugins/custom-dangerous-patterns/examples/custom-dangerous-patterns.yaml \
+cp ~/.hermes/plugins/custom-dangerous-patterns/examples/01-examples.yaml \
    ~/.hermes/custom-dangerous-patterns.yaml
 ```
 
@@ -640,8 +640,8 @@ hermes-custom-dangerous-patterns-plugin/
 ├── logs.py              # Log extraction and filtering for hermes custom-dangerous-patterns logs
 ├── AGENTS.md            # Developer guide: gotchas, testing safety, self-modification risks
 ├── examples/
-│   ├── custom-dangerous-patterns.yaml   # Example config with cloud/deployment patterns
-│   └── test-patterns.yaml               # Safe, disabled-by-default test patterns
+│   ├── 01-examples.yaml                 # Example config with cloud/deployment patterns
+│   └── 00-test.yaml                     # Safe, disabled-by-default test patterns
 ├── tests/
 │   ├── conftest.py       # Test fixtures, mocks, helpers
 │   ├── test_config.py    # Config loading, validation, integrity tests

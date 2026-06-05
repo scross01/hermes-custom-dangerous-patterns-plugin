@@ -63,7 +63,7 @@ Each check is tagged with its source:
 ## Testing safety
 
 - **Never use real dangerous commands** (`rm -rf /`, `DROP DATABASE`, `git push --force`) when testing approval/blocking logic.
-- ALWAYS use the provided test patterns from `examples/test-patterns.yaml` (all `enabled: false` by default)
+- ALWAYS use the provided test patterns from `examples/00-test.yaml` (all `enabled: false` by default)
 - Test patterns are named `[TEST]` and are safe by design:
   - File operations are scoped to `/tmp/` (ephemeral, no data loss)
   - Database operations target `test_` prefixed tables only

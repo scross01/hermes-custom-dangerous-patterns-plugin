@@ -9,3 +9,4 @@ author: Stephen Cross
 license: MIT
 dependencies:
   - ruamel.yaml>=0.18.0
+  - rich>=13.0.0
