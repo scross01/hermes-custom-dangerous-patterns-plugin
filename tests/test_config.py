@@ -10,8 +10,11 @@ import pytest
 # ---------------------------------------------------------------------------
 
 
-def test_resolve_default_path_no_hermes_constants():
+def test_resolve_default_path_no_hermes_constants(monkeypatch, tmp_path):
     """Fallback to ~/.hermes/ when hermes_constants is not importable."""
+    # Isolate from the user's actual home directory (which may have .d/)
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+
     _mods = {k: v for k, v in sys.modules.items() if k != "hermes_constants"}
     with pytest.MonkeyPatch.context() as mp:
         mp.setitem(sys.modules, "hermes_constants", {})
@@ -20,7 +23,7 @@ def test_resolve_default_path_no_hermes_constants():
         from config import _resolve_config_path
 
         result = _resolve_config_path()
-    assert result == Path.home() / ".hermes" / "custom-dangerous-patterns.yaml"
+    assert result == tmp_path / ".hermes" / "custom-dangerous-patterns.yaml"
 
 
 def test_resolve_path_with_hermes_constants(mock_hermes_constants, tmp_hermes_home):
@@ -422,7 +425,7 @@ def test_check_protected_patterns_modified(caplog):
     }
     previous = {
         "protected": {
-            "Critical Pattern": hashlib.sha256(
+            "0:Critical Pattern": hashlib.sha256(
                 br"\bOldPattern\b"
             ).hexdigest()
         }
@@ -452,7 +455,7 @@ def test_check_protected_patterns_unchanged(caplog):
     }
     previous = {
         "protected": {
-            "Vultr CLI": hashlib.sha256(br"\bvultr\b").hexdigest()
+            "0:Vultr CLI": hashlib.sha256(br"\bvultr\b").hexdigest()
         }
     }
 

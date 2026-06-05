@@ -13,3 +13,5 @@ uv.lock
 .vscode/
 .ruff_cache/
 .plans
+.rtk
+CLAUDE.md
