@@ -168,6 +168,9 @@ def glob_to_regex(glob_str: str) -> str:
         - ``{a,b}``          → ``(?:a|b)``  (brace expansion / alternation)
         - Regex meta-chars   → escaped
           (``.`` ``^`` ``$`` ``+`` ``[`` ``]`` ``\\`` ``|`` ``(`` ``)``)
+        - Trailing ``*``/``**`` → both the preceding ``\\s+`` and the
+          wildcard are wrapped in ``(?:...)?`` so the bare command also
+          matches (e.g. ``aws **`` matches ``aws`` and ``aws instance``).
         - ``\\b`` at start if first token starts with alphanumeric
         - ``\\b`` at end if last token ends with alphanumeric
 
@@ -269,7 +272,16 @@ def glob_to_regex(glob_str: str) -> str:
                 i += 1
         return "".join(result)
 
-    regex_body = r"\s+".join(_process_token(t) for t in tokens)
+    # Build the regex body. When the last token is a standalone ``*`` or
+    # ``**``, both the preceding ``\\s+`` separator and the wildcard itself
+    # are wrapped in ``(?:...)?`` so the bare command (no arguments) also
+    # matches.  Mid-command wildcards remain mandatory.
+    if len(tokens) > 1 and tokens[-1] in ("*", "**"):
+        prefix = r"\s+".join(_process_token(t) for t in tokens[:-1])
+        last_re = _process_token(tokens[-1])
+        regex_body = prefix + r"(?:\s+" + last_re + r")?"
+    else:
+        regex_body = r"\s+".join(_process_token(t) for t in tokens)
 
     # Add word boundaries only at positions that are alphanumeric.
     # Use tokens (not raw glob_str) so leading/trailing whitespace

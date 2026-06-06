@@ -562,6 +562,22 @@ def test_glob_to_regex_matches_as_expected():
         (".hidden", "hidden", False),
         ("echo", "echo", True),
         ("echo", "echoooo", False),  # word boundary prevents partial match
+        # Trailing ** is optional — bare command also matches
+        ("aws **", "aws", True),  # just the command, no args
+        ("aws **", "aws instance", True),  # one arg
+        ("aws **", "aws ec2 describe", True),  # many args
+        # Note: like all glob patterns, aws ** uses re.search() so it
+        # matches aws anywhere in the command (e.g. ``echo aws``).
+        # Trailing * is optional — bare command also matches
+        ("aws *", "aws", True),  # just the command
+        ("aws *", "aws instance", True),  # one arg
+        # Note: re.search() finds the pattern as a prefix, so extra args
+        # after the matched word are ignored (same behavior as pre-change).
+        # Mid-command wildcards are NOT optional
+        ("docker * ps", "docker ps", False),  # * in middle requires an arg
+        ("docker ** ps", "docker ps", False),  # ** in middle requires an arg
+        ("docker * ps", "docker container ps", True),
+        ("docker ** ps", "docker container ps", True),
     ]
     for glob_in, command, should_match in cases:
         regex = glob_to_regex(glob_in)
