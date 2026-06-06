@@ -184,6 +184,7 @@ patterns:
 | `enabled` | No | Boolean (default `true`). Set `false` to temporarily disable a pattern |
 | `group` | No | Optional string tag for categorization (e.g., `cloud`, `database`, `testing`) |
 | `protected` | No | Boolean (default `false`). If `true`, the pattern's regex is integrity-checked across sessions |
+| `glob` | No | Original glob string saved when pattern was created via `--glob` (metadata only) |
 
 ### Deny Patterns
 
@@ -207,6 +208,7 @@ deny_patterns:
 | `enabled` | No | Boolean (default `true`). Set `false` to temporarily disable |
 | `group` | No | Optional string tag for categorization |
 | `protected` | No | Boolean (default `false`). If `true`, integrity-checked across sessions |
+| `glob` | No | Original glob string saved when pattern was created via `--glob` (metadata only) |
 
 **Behavior note:** Deny patterns are checked by a wrapper around `check_all_command_guards()` that runs before `--yolo`/`mode=off` are evaluated. This means `--yolo` does **not** bypass deny patterns — an intentional safeguard that ensures deny-gated commands are always blocked regardless of mode. A future Hermes core integration (v0.5.0) may add native deny-pattern support upstream, at which point this workaround can be removed.
 
@@ -229,6 +231,7 @@ allow_patterns:
 | `enabled` | No | Boolean (default `true`). Set `false` to temporarily disable |
 | `group` | No | Optional string tag for categorization |
 | `protected` | No | Boolean (default `false`). If `true`, integrity-checked across sessions |
+| `glob` | No | Original glob string saved when pattern was created via `--glob` (metadata only) |
 
 ### A Note on `\b` (Word Boundaries)
 
@@ -283,7 +286,7 @@ Each check is tagged with its source:
 
 ### Config Integrity & Protected Patterns
 
-Starting in v0.2.0, the plugin tracks the integrity of your configuration across sessions:
+The plugin tracks the integrity of your configuration across sessions:
 
 - **Config hash tracking:** A SHA-256 hash of your full config YAML is stored in `~/.hermes/.custom-patterns-hash`. If the config changes between sessions, a `WARNING` is logged with the old and new pattern counts.
 - **Protected patterns:** Patterns with `protected: true` have their individual regex SHA-256 hashed and tracked. If a protected pattern is **modified** or **removed**, a `CRITICAL` security warning is logged at startup.
@@ -590,7 +593,7 @@ The plugin injects your custom patterns into Hermes's `DANGEROUS_PATTERNS` list 
 ```
 Hermes startup:
   1. Plugin discovery → register(ctx) runs
-  2. Resolves config path (env var → ~/.hermes/custom-dangerous-patterns.yaml)
+  2. Resolves config path (env var → ~/.hermes/custom-dangerous-patterns/ directory or single .yaml file)
   3. Loads YAML (supports directory mode: all *.yaml files merged)
   4. Runs integrity checks (config SHA-256 hash, protected pattern verification)
   5. Compiles regex patterns (block, allow, deny)
@@ -620,7 +623,8 @@ The built-in approval system then handles everything automatically:
 | Config file missing | Plugin loads silently, no patterns injected |
 | Config file invalid YAML | Log WARNING, plugin loads with empty pattern list |
 | Invalid regex in pattern | Log WARNING for that pattern, skip it, load valid ones |
-| Pattern matches but allow also matches | Allow wins — no prompt |
+| Block pattern matches but allow also matches | Allow wins — no prompt (allow wins over block) |
+| Deny pattern matches (and allow also matches) | Deny wins — blocked immediately (deny checked before allow) |
 | Deny pattern match | Blocked immediately, no prompt |
 | `--yolo` mode | Block patterns (custom + built-in) bypassed. Deny patterns still block — checked outside the original guard function. |
 | `approvals.mode: off` | Block patterns bypassed. Deny patterns still block — checked outside the original guard function. |
@@ -744,13 +748,17 @@ The integrity hash file is stored at `~/.hermes/.custom-patterns-hash`. Deleting
 
 ### Config file not found
 
-The plugin looks for `~/.hermes/custom-dangerous-patterns.yaml`. Override with:
+The plugin looks for `~/.hermes/custom-dangerous-patterns/` (directory)
+or `~/.hermes/custom-dangerous-patterns.yaml` (single file). Override with:
 
 ```bash
-export HERMES_CUSTOM_PATTERNS_PATH=/path/to/file.yaml
+export HERMES_CUSTOM_PATTERNS_PATH=/path/to/config.yaml
+
+# Or point to a directory:
+export HERMES_CUSTOM_PATTERNS_PATH=/path/to/config-directory/
 ```
 
-The path can point to a directory of `*.yaml` files (see [Directory Config Loading](#directory-config-loading-v020)).
+See [Directory Config Loading](#directory-config-loading) for details.
 
 ## Project Structure
 
