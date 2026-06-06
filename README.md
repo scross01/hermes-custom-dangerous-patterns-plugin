@@ -632,6 +632,42 @@ The built-in approval system then handles everything automatically:
 | Protected pattern missing/modified | CRITICAL warning logged at startup |
 | Allow pattern shadows built-in pattern | WARNING logged with details |
 
+## Security & Risks
+
+> The plugin's stance on self-modification is: **allow it, detect it, log it.**
+
+The agent running Hermes can read and write `~/.hermes/custom-dangerous-patterns.yaml`. This means an agent could add `allow_patterns: [{pattern: '.*'}]` to bypass all approval checks (except hardline commands, which are always blocked). This is by design — the plugin is a safety net, not a jail.
+
+The `_config_cache` freeze means mid-session edits are ignored, but changes take effect after the next Hermes restart.
+
+### Risks the plugin cannot prevent
+
+- An agent could add `allow_patterns: [{pattern: '.*'}]` to exempt itself from all dangerous-pattern checks
+- An agent could modify protected patterns — changing both the pattern and its `protected` flag
+- Config modifications via Python I/O or AI tool calls are invisible to pattern matching. Only literal command-line path references to the config file are potentially caught by patterns
+
+### Defenses the plugin does provide
+
+- **Protected patterns:** Patterns with `protected: true` have their regex SHA-256 hashed and tracked in `~/.hermes/.custom-patterns-hash`. If a protected pattern is modified or removed, a **CRITICAL** security warning is logged at startup.
+- **Config hash tracking:** The full config SHA-256 is stored between sessions. Any change triggers a `WARNING` on next load with details of what changed (old vs new pattern counts).
+- **New-allow shadowing detection:** If a new allow pattern could bypass a built-in dangerous-pattern check without a corresponding custom block pattern, a `WARNING` is logged with details.
+
+### Example bypass vectors
+
+| Command | Why pattern matching doesn't see it |
+|---------|-----------------------------------|
+| `python -c "open('~/.hermes/custom-dangerous-patterns.yaml').write('...')"` | Filename is in a Python string, not shell-visible |
+| AI file-write tool call | Tool handles I/O; filename not in command string |
+| `sed -i 's/block/allow/' ~/.hermes/custom-dangerous-patterns.yaml` | Filename visible but not in `_SENSITIVE_WRITE_TARGET` (out of scope) |
+| `tee ~/.hermes/custom-dangerous-patterns.yaml << 'EOF'` | Same: not in `_SENSITIVE_WRITE_TARGET` (out of scope) |
+
+### User-level hardening options (optional, not default)
+
+- Run the agent and Hermes under **separate OS users** so the agent cannot write to `~/.hermes/custom-dangerous-patterns.yaml` or `~/.hermes/config.yaml`
+- Set config file permissions to `0444` (read-only) for the agent's user
+- Mount the config directory read-only in containerized setups
+- Use `command_allowlist` only for patterns the user personally approved
+
 ## Troubleshooting
 
 ### Plugin not loading
@@ -726,7 +762,7 @@ hermes-custom-dangerous-patterns-plugin/
 ├── patterns.py          # Pattern compilation and matching (block, allow, deny)
 ├── cli.py               # CLI command handlers (hermes custom-dangerous-patterns ...)
 ├── logs.py              # Log extraction and filtering for hermes custom-dangerous-patterns logs
-├── AGENTS.md            # Developer guide: gotchas, testing safety, self-modification risks
+├── AGENTS.md            # Developer guide: gotchas, testing safety, CLI architecture
 ├── examples/
 │   ├── 01-examples.yaml                 # Example config with cloud/deployment patterns
 │   └── 00-test.yaml                     # Safe, disabled-by-default test patterns
