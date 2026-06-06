@@ -346,27 +346,76 @@ def test_glob_to_regex_basic():
 
 
 def test_glob_to_regex_wildcard_end():
-    """Trailing * produces unbounded .*"""
+    """Trailing * matches one word (non-whitespace)."""
     from patterns import glob_to_regex
 
     result = glob_to_regex("rm -rf /tmp/*")
-    assert result == r"\brm\s+-rf\s+/tmp/.*"
+    assert result == r"\brm\s+-rf\s+/tmp/\S+"
 
 
 def test_glob_to_regex_wildcard_both_ends():
-    """Leading and trailing * → no word boundaries."""
+    """Leading and trailing * → one word containing string (no word boundaries)."""
     from patterns import glob_to_regex
 
     result = glob_to_regex("*danger*")
-    assert result == r".*danger.*"
+    assert result == r"\S+danger\S+"
 
 
 def test_glob_to_regex_mid_wildcard():
-    """Wildcard in the middle of the pattern."""
+    """Wildcard in the middle matches exactly one argument."""
     from patterns import glob_to_regex
 
     result = glob_to_regex("docker * rm")
+    assert result == r"\bdocker\s+\S+\s+rm\b"
+
+
+def test_glob_to_regex_super_wildcard():
+    """** matches everything (including whitespace)."""
+    from patterns import glob_to_regex
+
+    result = glob_to_regex("docker ** rm")
     assert result == r"\bdocker\s+.*\s+rm\b"
+
+
+def test_glob_to_regex_brace_expansion():
+    """Brace expansion with prefix: each alt includes the prefix
+    (*.{env,bak} → *.{env,bak} → each alt glob-processed as \S+\.ext)."""
+    from patterns import glob_to_regex
+
+    result = glob_to_regex("ls *.{env,bak}")
+    assert result == r"\bls\s+(?:\S+\.env|\S+\.bak)"
+
+
+def test_glob_to_regex_brace_expansion_simple():
+    """Simple brace expansion with words."""
+    from patterns import glob_to_regex
+
+    result = glob_to_regex("deploy {prod,staging}")
+    assert result == r"\bdeploy\s+(?:prod|staging)"
+
+
+def test_glob_to_regex_brace_no_expansion_single():
+    """Single alternative (no comma) is not expanded — literal braces."""
+    from patterns import glob_to_regex
+
+    result = glob_to_regex("echo {hello}")
+    assert result == r"\becho\s+\{hello\}"
+
+
+def test_glob_to_regex_brace_no_expansion_empty():
+    """Empty braces are literal."""
+    from patterns import glob_to_regex
+
+    result = glob_to_regex("echo {}")
+    assert result == r"\becho\s+\{\}"
+
+
+def test_glob_to_regex_lone_brace():
+    """Unmatched { is escaped."""
+    from patterns import glob_to_regex
+
+    result = glob_to_regex("echo {hello")
+    assert result == r"\becho\s+\{hello\b"
 
 
 def test_glob_to_regex_question_mark():
@@ -390,7 +439,7 @@ def test_glob_to_regex_pipes():
     from patterns import glob_to_regex
 
     result = glob_to_regex("*curl* | *sh*")
-    assert result == r".*curl.*\s+\|\s+.*sh.*"
+    assert result == r"\S+curl\S+\s+\|\s+\S+sh\S+"
 
 
 def test_glob_to_regex_parentheses():
@@ -398,7 +447,7 @@ def test_glob_to_regex_parentheses():
     from patterns import glob_to_regex
 
     result = glob_to_regex("python -c (.*)")
-    assert result == r"\bpython\s+-c\s+\(\..*\)"
+    assert result == r"\bpython\s+-c\s+\(\.\S+\)"
 
 
 def test_glob_to_regex_empty():
@@ -456,6 +505,9 @@ def test_glob_to_regex_compiles_valid_regex():
         "rm -rf /tmp/*",
         "*danger*",
         "docker * rm",
+        "docker ** rm",
+        "ls *.{env,bak}",
+        "deploy {prod,staging}",
         "git push --force",
         "chmod 777",
         ".hidden",
@@ -477,14 +529,33 @@ def test_glob_to_regex_matches_as_expected():
     from patterns import glob_to_regex
 
     cases = [
+        # Basic exact-word matching
         ("echo hello", "echo hello", True),
         ("echo hello", "  echo  hello  ", True),  # \s+ matches multiple spaces
+        # Trailing * matches one word
         ("rm -rf /tmp/*", "rm -rf /tmp/foo", True),
+        ("rm -rf /tmp/*", "rm -rf /tmp/foo/bar", True),  # / is non-whitespace
         ("rm -rf /tmp/*", "rm -rf /var/foo", False),
-        ("*danger*", "very danger ous", True),
+        # * matches one word — cannot cross whitespace
+        ("*danger*", "verydangerous", True),  # single word containing 'danger'
+        ("*danger*", "very danger ous", False),  # spaces break ". " matching
         ("*danger*", "safe", False),
+        # * matches exactly one argument between tokens
         ("docker * rm", "docker container rm", True),
+        ("docker * rm", "docker container network rm", False),  # two words
         ("docker * rm", "docker compose up", False),
+        # ** matches everything (super wildcard)
+        ("docker ** rm", "docker container network rm", True),  # many words
+        ("docker ** rm", "docker container rm", True),
+        ("docker ** rm", "docker compose up", False),
+        # Brace expansion
+        ("ls *.{env,bak}", "ls file.env", True),
+        ("ls *.{env,bak}", "ls something.bak", True),
+        ("ls *.{env,bak}", "ls another.txt", False),
+        ("deploy {prod,staging}", "deploy prod", True),
+        ("deploy {prod,staging}", "deploy staging", True),
+        ("deploy {prod,staging}", "deploy dev", False),
+        # Exact string matching
         ("git push --force", "git push --force origin main", True),
         ("git push --force", "git push origin main", False),
         (".hidden", ".hidden", True),

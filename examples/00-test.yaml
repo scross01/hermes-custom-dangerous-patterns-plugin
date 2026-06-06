@@ -19,7 +19,6 @@ patterns:
     group: testing
     examples:
       - 'echo hello'
-      - 'echo allow'
 
 allow_patterns:
   - pattern: '\becho\s+allow\b'

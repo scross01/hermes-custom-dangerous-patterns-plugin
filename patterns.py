@@ -161,13 +161,20 @@ def glob_to_regex(glob_str: str) -> str:
     ``\\becho\\s+hello\\b``.
 
     Conversion rules:
-        - Whitespace runs  → ``\\s+``
-        - ``*``            → ``.*``
-        - ``?``            → ``.``
-        - Regex meta-chars → escaped
-          (``.`` ``^`` ``$`` ``+`` ``{`` ``[`` ``]`` ``\\`` ``|`` ``(`` ``)``)
+        - Whitespace runs    → ``\\s+``
+        - ``*``              → ``\\S+``  (one non-whitespace word)
+        - ``**``             → ``.*``    (match anything, super wildcard)
+        - ``?``              → ``.``     (match exactly one char)
+        - ``{a,b}``          → ``(?:a|b)``  (brace expansion / alternation)
+        - Regex meta-chars   → escaped
+          (``.`` ``^`` ``$`` ``+`` ``[`` ``]`` ``\\`` ``|`` ``(`` ``)``)
         - ``\\b`` at start if first token starts with alphanumeric
         - ``\\b`` at end if last token ends with alphanumeric
+
+    Brace expansion (``{a,b}``) creates regex alternation: ``{a,b}`` becomes
+    ``(?:a|b)``. Each alternative is individually glob-processed. Requires
+    at least two comma-separated values inside the braces. Nested braces are
+    not supported.
 
     Args:
         glob_str: A glob-style pattern (e.g. ``"echo hello"``, ``"rm -rf /tmp/*"``).
@@ -180,20 +187,86 @@ def glob_to_regex(glob_str: str) -> str:
     if not tokens:
         return ""
 
-    _regex_meta = set(r".^$+{}[]\|()")
+    # { and } are handled specially (brace expansion) so they're not in this set
+    _regex_meta = set(r".^$+[]\|()")
 
     def _process_token(token: str) -> str:
-        """Convert a single glob token to its regex fragment."""
+        """Convert a single glob token to its regex fragment.
+
+        Brace expansion (``{a,b}``) is handled first: the prefix before
+        ``{`` is shared by all alternatives (like shell brace expansion),
+        so ``*.{env,bak}`` becomes ``(?:\\.env|\\.bak)`` where each
+        alternative is ``\\.env`` / ``\\.bak`` — glob-processed as a
+        complete unit including the prefix.
+        """
+        # Scan for a valid brace expansion group
+        scan = 0
+        brace_start = None
+        brace_end = None
+        while scan < len(token):
+            if token[scan] == "{":
+                end = token.find("}", scan + 1)
+                if end != -1:
+                    inner = token[scan + 1:end]
+                    if inner:
+                        alts = [a for a in inner.split(",") if a]
+                        if len(alts) > 1:
+                            brace_start = scan
+                            brace_end = end
+                            break
+                    # Not a valid expansion — skip past and keep scanning
+                    scan = end + 1
+                    continue
+                # No closing brace — rest is literal
+                break
+            elif token[scan] == "}":
+                # Unmatched close brace — rest is literal
+                break
+            scan += 1
+
+        if brace_start is not None:
+            # Brace expansion: prefix + each alt is glob-processed as a unit
+            prefix = token[:brace_start]
+            inner = token[brace_start + 1:brace_end]
+            alts = [a for a in inner.split(",") if a]
+            alternatives = [
+                _process_token(prefix + alt) for alt in alts
+            ]
+            processed = "|".join(alternatives)
+            # Suffix (chars after closing })
+            suffix = token[brace_end + 1:]
+            if suffix:
+                return "(?:" + processed + ")" + _process_token(suffix)
+            return "(?:" + processed + ")"
+
+        # Normal processing (no brace expansion)
         result: list[str] = []
-        for ch in token:
-            if ch == "*":
+        i = 0
+        while i < len(token):
+            ch = token[i]
+            # ** super wildcard (match everything) — check before single *
+            if ch == "*" and i + 1 < len(token) and token[i + 1] == "*":
                 result.append(".*")
+                i += 2
+            # * single wildcard (match one non-whitespace word)
+            elif ch == "*":
+                result.append("\\S+")
+                i += 1
             elif ch == "?":
                 result.append(".")
+                i += 1
+            elif ch == "{":
+                result.append("\\{")
+                i += 1
+            elif ch == "}":
+                result.append("\\}")
+                i += 1
             elif ch in _regex_meta:
                 result.append("\\" + ch)
+                i += 1
             else:
                 result.append(ch)
+                i += 1
         return "".join(result)
 
     regex_body = r"\s+".join(_process_token(t) for t in tokens)

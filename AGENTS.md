@@ -262,19 +262,24 @@ The `add` command supports glob-style pattern entry so users don't need to write
 
 **Conversion rules** (in `patterns.py:glob_to_regex()`):
 - Whitespace runs → `\\s+`
-- `*` → `.*`  (match any chars)
-- `?` → `.`   (match exactly one char)
-- Regex meta-chars (`. ^ $ + { [ ] \\ | ( )`) → escaped
+- `*` → `\\S+`  (one non-whitespace word — **positional**)
+- `**` → `.*`    (match anything including whitespace — **super wildcard**)
+- `?` → `.`      (match exactly one char)
+- `{a,b}` → `(?:a|b)`  (**brace expansion** — each alt includes the prefix)
+- Regex meta-chars (`. ^ $ + [ ] \\ | ( )`) → escaped
 - `\\b` word boundaries added at alphanumeric starts/ends
 
 **Examples:**
 
-| Glob | Generated regex |
-|---|---|
-| `echo hello` | `\\becho\\s+hello\\b` |
-| `rm -rf /tmp/*` | `\\brm\\s+-rf\\s+/tmp/.*` |
-| `*danger*` | `.*danger.*` |
-| `docker * rm` | `\\bdocker\\s+.*\\s+rm\\b` |
+| Glob | Generated regex | Behavior |
+|---|---|---|
+| `echo hello` | `\\becho\\s+hello\\b` | Match exactly two words |
+| `rm -rf /tmp/*` | `\\brm\\s+-rf\\s+/tmp/\\S+` | Trailing `*` matches one path component |
+| `docker ** rm` | `\\bdocker\\s+.*\\s+rm\\b` | `**` matches any arguments between `docker` and `rm` |
+| `docker * rm` | `\\bdocker\\s+\\S+\\s+rm\\b` | `*` matches exactly ONE argument between `docker` and `rm` |
+| `mycli * delete *` | `\\bmycli\\s+\\S+\\s+delete\\s+\\S+` | Positional: `delete` must be the second argument |
+| `ls *.{env,bak}` | `\\bls\\s+(?:\\S+\\.env|\\S+\\.bak)` | Brace expansion: match `.env` or `.bak` extensions |
+| `deploy {prod,staging}` | `\\bdeploy\\s+(?:prod|staging)` | Match `deploy prod` or `deploy staging` |
 
 **Interactive flow:**
 1. Type `echo hello` → regex `\\becho\\s+hello\\b` is generated and shown
@@ -298,6 +303,21 @@ examples:                      # only if provided
 ```
 
 **Non-interactive:** Use `--glob` instead of `--pattern`. Mutually exclusive — cannot specify both.
+
+### `*` vs `**` — positional vs super wildcard
+
+- `*` between tokens matches **exactly one argument** (non-whitespace word). Use it when you know the command structure — e.g., `mycli * delete *` matches `mycli instance delete instance1` but NOT `mycli instance interface delete interface1` (too many args before `delete`).
+- `**` between tokens matches **any number of arguments** (including zero). Use it when the argument count is unknown — e.g., `docker ** rm` matches `docker container rm` AND `docker container network rm`.
+
+### Brace expansion `{a,b}`
+
+Shell-compatible brace expansion: the prefix before `{` is shared by all alternatives.
+
+- `{prod,staging}` → matches `prod` or `staging`
+- `*.{env,bak}` → matches `*.env` or `*.bak` (prefix `*.` shared)
+- `{hello}{a,b}` → skips single-alt `{hello}`, expands `{a,b}` as `(?:{hello}a|{hello}b)`
+
+A single alternative (`{hello}`) or empty braces (`{}`) are treated as literal text, not expansion.
 
 ### `add --target` — writing to a specific file
 

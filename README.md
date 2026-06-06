@@ -515,7 +515,8 @@ hermes custom-dangerous-patterns add --target 02-mycloud.yaml --type block \
     --description 'Heroku destructive commands' \
     --group cloud
 
-# Glob-style pattern entry (converted to regex automatically)
+# Glob-style pattern entry (converted to regex automatically).
+# * matches ONE word, ** matches ANYTHING, {a,b} for alternatives.
 hermes custom-dangerous-patterns add --type block \
     --glob 'heroku *destroy*' \
     --description 'Heroku destructive commands'
