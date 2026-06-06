@@ -18,9 +18,9 @@ _DEFAULT_LOG_PATH = Path.home() / ".hermes" / "logs"
 # Pattern to identify plugin-specific log entries.
 # Matches the logger format used by the plugin: logger.info("custom-dangerous-patterns: ...")
 _PLUGIN_LOG_PATTERN = re.compile(
-    r"^(?P<timestamp>\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})"
-    r"\s+\[(?P<level>[A-Z]+)\]"
-    r".*custom-dangerous-patterns:\s+(?P<message>.*)$"
+    r"^(?P<timestamp>\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}(?:,\d+)?)"
+    r"\s+(?P<level>[A-Z]+)"
+    r"\s+.*custom-dangerous-patterns:\s+(?P<message>.*)$"
 )
 
 
