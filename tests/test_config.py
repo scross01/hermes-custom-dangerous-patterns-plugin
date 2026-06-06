@@ -209,6 +209,107 @@ def test_validate_pattern_invalid_regex():
     assert result is None
 
 
+def test_validate_pattern_glob_only():
+    """Glob without pattern auto-generates the regex."""
+    from config import _validate_pattern
+
+    result = _validate_pattern(
+        {"glob": "echo hello", "description": "Echo hello"},
+        0,
+        "patterns",
+    )
+    assert result is not None
+    assert result["pattern"] == r"\becho\s+hello\b"
+    assert result["glob"] == "echo hello"
+    assert result["description"] == "Echo hello"
+
+
+def test_validate_pattern_glob_and_pattern():
+    """When both glob and pattern are present, pattern is used as-is."""
+    from config import _validate_pattern
+
+    result = _validate_pattern(
+        {
+            "glob": "echo hello",
+            "pattern": r"\banother\s+pattern\b",
+            "description": "Custom pattern",
+        },
+        0,
+        "patterns",
+    )
+    assert result is not None
+    # Pattern should be the explicit one, not auto-generated from glob
+    assert result["pattern"] == r"\banother\s+pattern\b"
+    assert result["glob"] == "echo hello"
+
+
+def test_validate_pattern_glob_no_pattern_both_missing():
+    """Neither glob nor pattern returns None."""
+    from config import _validate_pattern
+
+    result = _validate_pattern(
+        {"description": "nothing here"},
+        0,
+        "patterns",
+    )
+    assert result is None
+
+
+def test_validate_pattern_glob_empty_string_no_pattern():
+    """Glob is empty string, no pattern, returns None."""
+    from config import _validate_pattern
+
+    result = _validate_pattern(
+        {"glob": "", "description": "empty glob"},
+        0,
+        "patterns",
+    )
+    assert result is None
+
+
+def test_validate_pattern_glob_non_string():
+    """Glob non-string value is ignored."""
+    from config import _validate_pattern
+
+    result = _validate_pattern(
+        {"glob": True, "pattern": r"\bvultr\b", "description": "Vultr"},
+        0,
+        "patterns",
+    )
+    assert result is not None
+    assert result["pattern"] == r"\bvultr\b"
+    # Non-string glob should not be stored
+    assert "glob" not in result
+
+
+def test_validate_pattern_glob_on_allow_patterns():
+    """Glob-only entry works for allow patterns too."""
+    from config import _validate_pattern
+
+    result = _validate_pattern(
+        {"glob": "echo allow", "description": "Allow echo"},
+        0,
+        "allow_patterns",
+    )
+    assert result is not None
+    assert result["pattern"] == r"\becho\s+allow\b"
+    assert result["glob"] == "echo allow"
+
+
+def test_validate_pattern_glob_on_deny_patterns():
+    """Glob-only entry works for deny patterns too."""
+    from config import _validate_pattern
+
+    result = _validate_pattern(
+        {"glob": "echo deny", "description": "Deny echo"},
+        0,
+        "deny_patterns",
+    )
+    assert result is not None
+    assert result["pattern"] == r"\becho\s+deny\b"
+    assert result["glob"] == "echo deny"
+
+
 # ---------------------------------------------------------------------------
 # _validate_config
 # ---------------------------------------------------------------------------
@@ -715,6 +816,55 @@ def test_load_yaml_combined_dir_only_no_sibling(tmp_path):
     assert result is not None
     assert len(result["patterns"]) == 1
     assert result["patterns"][0]["description"] == "Test pattern"
+
+
+# ---------------------------------------------------------------------------
+# _pattern_key / _dedup_entries with glob-only entries
+# ---------------------------------------------------------------------------
+
+
+def test_dedup_entries_glob_only_preserves_all():
+    """Glob-only entries are not collapsed during dedup.
+
+    When entries have ``glob`` but no ``pattern``, the fallback in
+    ``_pattern_key`` uses the glob string as the key, so all entries
+    survive dedup instead of being treated as duplicates with empty
+    key.
+    """
+    from config import _dedup_entries
+
+    entries = [
+        {"glob": "echo hello", "description": "Echo hello"},
+        {"glob": "echo world", "description": "Echo world"},
+        {"glob": "echo foo", "description": "Echo foo"},
+    ]
+    result = _dedup_entries(entries)
+    assert len(result) == 3
+
+
+def test_dedup_entries_mixed_glob_and_pattern_preserves_all():
+    """Mix of glob-only and pattern-only entries are all preserved."""
+    from config import _dedup_entries
+
+    entries = [
+        {"glob": "echo hello", "description": "From glob"},
+        {"pattern": r"\becho\b", "description": "From pattern"},
+    ]
+    result = _dedup_entries(entries)
+    assert len(result) == 2
+
+
+def test_dedup_entries_glob_only_collapses_identical_globs():
+    """Exact same glob string is still deduped (last wins)."""
+    from config import _dedup_entries
+
+    entries = [
+        {"glob": "echo hello", "description": "First"},
+        {"glob": "echo hello", "description": "Second"},
+    ]
+    result = _dedup_entries(entries)
+    assert len(result) == 1
+    assert result[0]["description"] == "Second"
 
 
 def test_resolve_config_path_combined_mode(tmp_path, monkeypatch):

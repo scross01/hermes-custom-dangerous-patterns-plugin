@@ -838,6 +838,22 @@ def cmd_validate(
                     f"pattern '[bold]{pat}[/bold]' matches everything")
                 )
 
+            # Warn if glob and pattern disagree
+            glob_str = entry.get("glob")
+            if glob_str and pat:
+                from .patterns import glob_to_regex
+
+                generated = glob_to_regex(glob_str)
+                if generated and generated != pat:
+                    warnings.append(
+                        warn_mark(
+                            f"{section_label}[{i}] glob warning: "
+                            f"glob '[bold]{glob_str}[/bold]' generates "
+                            f"pattern '[bold]{generated}[/bold]' but stored "
+                            f"pattern is '[bold]{pat}[/bold]'"
+                        )
+                    )
+
     if warnings:
         lines.append("")
         lines.extend(warnings)
@@ -861,7 +877,6 @@ def cmd_info() -> tuple[str, int]:
     from .display import subheading, success, check, cross, warn_mark, muted, path_info, key_value
 
     config_path = resolve_config_path()
-    plugin_version = "0.3.0"
 
     lines: list[str] = []
 

@@ -178,13 +178,15 @@ patterns:
 
 | Field | Required | Description |
 |-------|----------|-------------|
-| `pattern` | Yes | Python regex (matched with `re.IGNORECASE \| re.DOTALL`) |
+| `pattern` | Yes* | Python regex (matched with `re.IGNORECASE \| re.DOTALL`). Can be omitted if `glob` is provided — the regex is auto-generated from the glob on config load. |
 | `description` | Yes | Human-readable label shown in the approval prompt |
 | `examples` | No | Documentation-only list of example commands |
 | `enabled` | No | Boolean (default `true`). Set `false` to temporarily disable a pattern |
 | `group` | No | Optional string tag for categorization (e.g., `cloud`, `database`, `testing`) |
 | `protected` | No | Boolean (default `false`). If `true`, the pattern's regex is integrity-checked across sessions |
-| `glob` | No | Original glob string saved when pattern was created via `--glob` (metadata only) |
+| `glob` | No | Original glob string saved when pattern was created via `--glob`. If `pattern` is not present, the glob is auto-converted to regex on config load. |
+
+> **\* `pattern` or `glob` required.** At least one must be present. If both are provided, `pattern` is used as-is. If only `glob` is present, the regex is auto-generated during config validation.
 
 ### Deny Patterns
 
@@ -202,13 +204,15 @@ deny_patterns:
 
 | Field | Required | Description |
 |-------|----------|-------------|
-| `pattern` | Yes | Python regex (same flags as block patterns) |
+| `pattern` | Yes* | Python regex (same flags as block patterns). Can be omitted if `glob` is provided — auto-generated from glob. |
 | `description` | Yes | Human-readable label shown in the block message |
 | `examples` | No | Documentation-only list of example commands |
 | `enabled` | No | Boolean (default `true`). Set `false` to temporarily disable |
 | `group` | No | Optional string tag for categorization |
 | `protected` | No | Boolean (default `false`). If `true`, integrity-checked across sessions |
-| `glob` | No | Original glob string saved when pattern was created via `--glob` (metadata only) |
+| `glob` | No | Original glob string. If `pattern` is absent, auto-converted to regex on load. |
+
+> **\* `pattern` or `glob` required.** At least one must be present. If both are provided, `pattern` is used as-is.
 
 **Behavior note:** Deny patterns are checked by a wrapper around `check_all_command_guards()` that runs before `--yolo`/`mode=off` are evaluated. This means `--yolo` does **not** bypass deny patterns — an intentional safeguard that ensures deny-gated commands are always blocked regardless of mode. A future Hermes core integration (v0.5.0) may add native deny-pattern support upstream, at which point this workaround can be removed.
 
@@ -226,12 +230,14 @@ allow_patterns:
 
 | Field | Required | Description |
 |-------|----------|-------------|
-| `pattern` | Yes | Python regex (same flags as block patterns) |
+| `pattern` | Yes* | Python regex (same flags as block patterns). Can be omitted if `glob` is provided — auto-generated from glob. |
 | `description` | No | Documentation-only label |
 | `enabled` | No | Boolean (default `true`). Set `false` to temporarily disable |
 | `group` | No | Optional string tag for categorization |
 | `protected` | No | Boolean (default `false`). If `true`, integrity-checked across sessions |
-| `glob` | No | Original glob string saved when pattern was created via `--glob` (metadata only) |
+| `glob` | No | Original glob string. If `pattern` is absent, auto-converted to regex on load. |
+
+> **\* `pattern` or `glob` required.** At least one must be present. If both are provided, `pattern` is used as-is.
 
 ### A Note on `\b` (Word Boundaries)
 
@@ -483,6 +489,11 @@ hermes custom-dangerous-patterns validate                    # validate default 
 hermes custom-dangerous-patterns validate --path /tmp/cfg.yaml  # validate a specific file
 hermes custom-dangerous-patterns validate --quiet            # exit code only (CI/CD)
 ```
+
+Validates YAML syntax, regex compilation, and pattern consistency. In
+addition to basic validation, if a pattern defines both `glob` and
+`pattern` and the stored regex differs from what the glob would generate,
+a warning is emitted to flag the discrepancy.
 
 Exit code 0 = valid, 1 = errors found, 2 = file not found.
 

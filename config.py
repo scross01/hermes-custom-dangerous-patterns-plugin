@@ -207,7 +207,13 @@ def _load_single_yaml(path: Path) -> dict[str, Any] | None:
 
 
 def _validate_pattern(entry: Any, index: int, field: str) -> dict[str, str] | None:
-    """Validate a single pattern entry. Returns normalized dict or None."""
+    """Validate a single pattern entry. Returns normalized dict or None.
+
+    If ``pattern`` is missing but ``glob`` is provided, the glob is
+    automatically converted to a regex pattern via :func:`glob_to_regex`.
+    If both ``glob`` and ``pattern`` are present, ``pattern`` is used
+    as-is.
+    """
     if not isinstance(entry, dict):
         logger.warning(
             "custom-dangerous-patterns: %s[%d] must be a mapping, got %s — skipping",
@@ -218,9 +224,44 @@ def _validate_pattern(entry: Any, index: int, field: str) -> dict[str, str] | No
         return None
 
     pattern = entry.get("pattern")
+    glob_str = entry.get("glob")
+
+    # If glob is a non-empty string but pattern is missing/invalid,
+    # auto-generate pattern from glob.
+    if (
+        (not isinstance(pattern, str) or not pattern.strip())
+        and isinstance(glob_str, str)
+        and glob_str.strip()
+    ):
+        # Use relative import when loaded as part of hermes_plugins package,
+        # fall back to direct import for standalone testing.
+        try:
+            from .patterns import glob_to_regex
+        except ImportError:
+            from patterns import glob_to_regex  # type: ignore[import-untyped]
+
+        generated = glob_to_regex(glob_str.strip())
+        if generated:
+            pattern = generated
+            logger.info(
+                "custom-dangerous-patterns: %s[%d] auto-generated pattern %r from glob %r",
+                field,
+                index,
+                pattern,
+                glob_str,
+            )
+        else:
+            logger.warning(
+                "custom-dangerous-patterns: %s[%d] glob %r produced empty regex — skipping",
+                field,
+                index,
+                glob_str,
+            )
+            return None
+
     if not isinstance(pattern, str) or not pattern.strip():
         logger.warning(
-            "custom-dangerous-patterns: %s[%d] missing required 'pattern' string — skipping",
+            "custom-dangerous-patterns: %s[%d] missing required 'pattern' or 'glob' — skipping",
             field,
             index,
         )
@@ -261,7 +302,6 @@ def _validate_pattern(entry: Any, index: int, field: str) -> dict[str, str] | No
     if not isinstance(protected, bool):
         protected = False
 
-    glob_str = entry.get("glob")
     if glob_str is not None and not isinstance(glob_str, str):
         glob_str = None
 
@@ -528,8 +568,13 @@ def _load_yaml_excluding(directory: Path, exclude_filename: str) -> dict[str, An
 
 
 def _pattern_key(entry: dict[str, Any]) -> str:
-    """Return the comparison key for a pattern entry (its regex pattern)."""
-    return entry.get("pattern", "")
+    """Return the comparison key for a pattern entry (its regex pattern).
+
+    Falls back to ``glob`` when ``pattern`` is absent, so that glob-only
+    entries (which haven't been validated yet) are not all treated as the
+    same key by :func:`_dedup_entries` during raw YAML loading.
+    """
+    return entry.get("pattern", "") or entry.get("glob", "")
 
 
 def _dedup_entries(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:

@@ -543,6 +543,107 @@ def test_cmd_init_with_examples(monkeypatch, cli_module, tmp_path):
     assert (dir_path / "00-test.yaml").is_file()
 
 
+# ---------------------------------------------------------------------------
+# cmd_validate tests — glob mismatch warning
+# ---------------------------------------------------------------------------
+
+
+def test_cmd_validate_glob_mismatch_warning(monkeypatch, cli_module, tmp_path):
+    """cmd_validate warns when glob and pattern disagree."""
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text("patterns: []", encoding="utf-8")
+    monkeypatch.setattr(
+        sys.modules["hermes_plugins.config"],
+        "resolve_config_path",
+        lambda: config_path,
+    )
+    # Return raw config where a pattern has both glob and pattern that differ
+    monkeypatch.setattr(
+        sys.modules["hermes_plugins.config"],
+        "_load_yaml",
+        lambda path: {
+            "patterns": [
+                {
+                    "glob": "echo hello",
+                    "pattern": r"\becho\s+world\b",
+                    "description": "Mismatch test",
+                },
+            ],
+        },
+    )
+
+    output, exit_code = cli_module.cmd_validate()
+    assert exit_code == 0
+    assert "glob warning" in output
+    assert "echo hello" in output  # glob value shown
+    # Check that generated and stored patterns appear (use raw strings
+    # so \\b and \\s are literal backslash sequences, not escape sequences)
+    assert r"\becho\s+hello\b" in output  # generated from glob "echo hello"
+    assert r"\becho\s+world\b" in output   # stored pattern
+
+
+def test_cmd_validate_glob_match_no_warning(monkeypatch, cli_module, tmp_path):
+    """cmd_validate does not warn when glob and pattern agree."""
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text("patterns: []", encoding="utf-8")
+    monkeypatch.setattr(
+        sys.modules["hermes_plugins.config"],
+        "resolve_config_path",
+        lambda: config_path,
+    )
+    monkeypatch.setattr(
+        sys.modules["hermes_plugins.config"],
+        "_load_yaml",
+        lambda path: {
+            "patterns": [
+                {
+                    "glob": "echo hello",
+                    "pattern": r"\becho\s+hello\b",
+                    "description": "Match test",
+                },
+            ],
+        },
+    )
+
+    output, exit_code = cli_module.cmd_validate()
+    assert exit_code == 0
+    assert "glob warning" not in output
+    assert "Result: VALID" in output
+
+
+def test_cmd_validate_no_glob_no_warning(monkeypatch, cli_module, tmp_path):
+    """cmd_validate does not warn when no glob is present."""
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text("patterns: []", encoding="utf-8")
+    monkeypatch.setattr(
+        sys.modules["hermes_plugins.config"],
+        "resolve_config_path",
+        lambda: config_path,
+    )
+    monkeypatch.setattr(
+        sys.modules["hermes_plugins.config"],
+        "_load_yaml",
+        lambda path: {
+            "patterns": [
+                {
+                    "pattern": r"\becho\s+hello\b",
+                    "description": "No glob here",
+                },
+            ],
+        },
+    )
+
+    output, exit_code = cli_module.cmd_validate()
+    assert exit_code == 0
+    assert "glob warning" not in output
+    assert "Result: VALID" in output
+
+
+# ---------------------------------------------------------------------------
+# Helper function tests
+# ---------------------------------------------------------------------------
+
+
 def test_build_minimal_starter_config(cli_module):
     """_build_minimal_starter_config returns expected structure."""
     config = cli_module._build_minimal_starter_config()

@@ -1,5 +1,16 @@
 # Change Log
 
+## 0.3.1
+
+- **Glob auto-conversion on config load.** When a pattern entry has `glob`
+  but no `pattern`, the regex is automatically generated from the glob
+  during config validation — you can now define patterns with just a glob.
+  When both `glob` and `pattern` are present, `pattern` is used as-is.
+- **`validate` glob mismatch warning.** If both `glob` and `pattern` are
+  defined and the stored pattern differs from the pattern generated from
+  the glob, `validate` now emits a warning highlighting the discrepancy.
+- Bumped plugin version to 0.3.1.
+
 ## 0.3.0
 
 - **BREAKING:** Config directory renamed from `custom-dangerous-patterns.d/` to `custom-dangerous-patterns/`. If you have an existing `.d/` directory, rename it manually:
