@@ -1,5 +1,9 @@
 # Change Log
 
+## 0.3.2
+
+- **Security fix:** Replaced `tempfile.mktemp()` with `tempfile.NamedTemporaryFile()` in `_write_yaml()` to eliminate a TOCTOU race condition (CodeQL `py/insecure-temporary-file`). The atomic write pattern is preserved; the temp file is now created securely and cleaned up on all failure paths.
+
 ## 0.3.1
 
 - **`logs` command** now extracts the plugins logs corectly. 

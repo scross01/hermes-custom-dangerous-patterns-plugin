@@ -671,17 +671,31 @@ def _write_yaml(output: dict[str, Any], path: Path) -> None:
 
     import tempfile
 
-    tmp_path = Path(tempfile.mktemp(suffix=".yaml", dir=path.parent))
+    # Use NamedTemporaryFile instead of mktemp() to avoid a TOCTOU race
+    # condition (CodeQL py/insecure-temporary-file).  The file is created
+    # atomically inside the user's config directory, then renamed onto
+    # the target path for an atomic write.
+    with tempfile.NamedTemporaryFile(
+        mode="w",
+        suffix=".yaml",
+        dir=path.parent,
+        delete=False,
+        encoding="utf-8",
+    ) as tmp:
+        tmp_path = Path(tmp.name)
+        try:
+            yaml = YAML()
+            yaml.indent(mapping=2, sequence=4, offset=2)
+            yaml.default_flow_style = False
+            yaml.dump(output, tmp)
+        except Exception:
+            tmp_path.unlink()
+            raise
+
     try:
-        yaml = YAML()
-        yaml.indent(mapping=2, sequence=4, offset=2)
-        yaml.default_flow_style = False
-        with open(tmp_path, "w", encoding="utf-8") as f:
-            yaml.dump(output, f)
         tmp_path.replace(path)
     except Exception:
-        if tmp_path.exists():
-            tmp_path.unlink()
+        tmp_path.unlink()
         raise
 
 
