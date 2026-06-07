@@ -6,6 +6,7 @@
 - Update glob to regex conversion to prevent command name matching directory components 
 - Handle missing rich dependency, prevent potential ImportErrors when rendering output.
 - Fix error in help for logs subcommand
+- Fix `ValueError` on Ctrl-C when exiting `logs --follow` mode
 
 ## 0.3.2
 

@@ -33,8 +33,7 @@ def cmd_list(
     search: str | None = None,
     disabled: bool = False,
     enabled: bool = False,
-    builtins: bool = False,
-) -> tuple[str, int]:
+    builtins: bool = False,        ) -> tuple[str, str, int]:
     """List all user-defined patterns with their type, status, and description."""
     from .config import load_config, resolve_config_path
 
@@ -159,8 +158,7 @@ def cmd_list(
 def cmd_test(
     command: str,
     verbose: bool = False,
-    skip_builtins: bool = False,
-) -> tuple[str, int]:
+    skip_builtins: bool = False,        ) -> tuple[str, str, int]:
     """Test a command against all pattern types and show the result.
 
     Simulates the exact evaluation order used at runtime:
@@ -309,8 +307,7 @@ def _check_builtins_for_test(
 
 def cmd_init(
     with_examples: bool = False,
-    force: bool = False,
-) -> tuple[str, int]:
+    force: bool = False,        ) -> tuple[str, str, int]:
     """Create a starter config directory and guide the user.
 
     Creates ~/.hermes/custom-dangerous-patterns/ (a directory) with
@@ -475,8 +472,7 @@ def cmd_enable(
     target: str | None = None,
     pattern_type: str | None = None,
     group: str | None = None,
-    dry_run: bool = False,
-) -> tuple[str, int]:
+    dry_run: bool = False,        ) -> tuple[str, str, int]:
     """Enable patterns by index, description, or group.
 
     With no arguments, launches interactive selection.
@@ -489,8 +485,7 @@ def cmd_disable(
     target: str | None = None,
     pattern_type: str | None = None,
     group: str | None = None,
-    dry_run: bool = False,
-) -> tuple[str, int]:
+    dry_run: bool = False,        ) -> tuple[str, str, int]:
     """Disable patterns by index, description, or group.
 
     With no arguments, launches interactive selection.
@@ -504,8 +499,7 @@ def _toggle_patterns(
     target: str | None,
     pattern_type: str | None,
     group: str | None,
-    dry_run: bool,
-) -> tuple[str, int]:
+    dry_run: bool,        ) -> tuple[str, str, int]:
     """Shared implementation for enable/disable commands.
 
     When no target, group, or type is specified, launches interactive
@@ -632,8 +626,7 @@ def _toggle_interactive(
     config_path: Path,
     all_entries: list[dict[str, Any]],
     enable: bool,
-    dry_run: bool,
-) -> tuple[str, int]:
+    dry_run: bool,        ) -> tuple[str, str, int]:
     """Interactive enable/disable with numbered selection."""
     from .config import save_config
     from .display import _console
@@ -769,8 +762,7 @@ def _toggle_interactive(
 
 def cmd_validate(
     path: str | None = None,
-    quiet: bool = False,
-) -> tuple[str, int]:
+    quiet: bool = False,        ) -> tuple[str, str, int]:
     """Validate config syntax and regexes."""
     from .config import _load_yaml, _validate_config, resolve_config_path
     from .display import subheading, check, cross, warn_mark, success, muted, path_info
@@ -982,8 +974,7 @@ def cmd_logs(
     level: str | None = None,
     limit: int = 100,
     since: str | None = None,
-    follow: bool = False,
-) -> tuple[str, int]:
+    follow: bool = False,        ) -> tuple[str, str, int]:
     """Show plugin-specific log entries from the Hermes log and match log.
 
     Reads from both Hermes's standard Python log (filtered for
@@ -1016,7 +1007,7 @@ def cmd_logs(
 
     if follow:
         follow_logs(log_path)
-        return ("", 0)
+        return ("", "", 0)
 
     entries = extract_logs(log_path=log_path, level=level, limit=limit, since=since)
     lines = format_log_entries(entries, level=level)
@@ -1044,8 +1035,7 @@ def cmd_add(
     protected: bool = False,
     dry_run: bool = False,
     glob_str: str | None = None,
-    target_file: str | None = None,
-) -> tuple[str, int]:
+    target_file: str | None = None,        ) -> tuple[str, str, int]:
     """Add a custom pattern via interactive prompts or CLI flags.
 
     With no arguments, launches interactive entry automatically.
@@ -1121,8 +1111,7 @@ def cmd_add(
 
 def _add_interactive(
     config: dict[str, Any], config_path: Path, dry_run: bool,
-    target_file: str | None = None,
-) -> tuple[str, int]:
+    target_file: str | None = None,        ) -> tuple[str, str, int]:
     """Guided interactive pattern entry with glob-to-regex support.
 
     Flow:
@@ -1303,8 +1292,7 @@ def _add_noninteractive(
     protected: bool,
     dry_run: bool,
     glob_str: str | None = None,
-    target_file: str | None = None,
-) -> tuple[str, int]:
+    target_file: str | None = None,        ) -> tuple[str, str, int]:
     """Add a pattern via CLI flags."""
     from .config import save_config, append_to_yaml_file
     from .display import success, cross, muted
@@ -1387,8 +1375,7 @@ def cmd_remove(
     target: str | None = None,
     pattern_type: str | None = None,
     dry_run: bool = False,
-    force: bool = False,
-) -> tuple[str, int]:
+    force: bool = False,        ) -> tuple[str, str, int]:
     """Remove a pattern interactively or by index/description.
 
     With no target, launches interactive selection automatically.
@@ -1428,8 +1415,7 @@ def _remove_interactive(
     config: dict[str, Any],
     config_path: Path,
     all_entries: list[dict[str, Any]],
-    dry_run: bool,
-) -> tuple[str, int]:
+    dry_run: bool,        ) -> tuple[str, str, int]:
     """Interactive pattern removal with numbered selection."""
     from .config import save_config, remove_entry_from_file
     from .display import _console
@@ -1544,8 +1530,7 @@ def _remove_by_target(
     target: str,
     pattern_type: str | None,
     dry_run: bool,
-    force: bool = False,
-) -> tuple[str, int]:
+    force: bool = False,        ) -> tuple[str, str, int]:
     """Non-interactive pattern removal by index or description match.
 
     Shows the matched pattern and requests confirmation before removing,
