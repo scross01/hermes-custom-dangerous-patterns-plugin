@@ -1765,8 +1765,13 @@ def _emit(output, exit_code: int, footer: str = "") -> None:
     Rich markup rendering.
     """
     if output:
-        from rich.text import Text as _Text
-        if isinstance(output, _Text):
+        try:
+            from rich.text import Text as _Text
+            _has_rich_text = True
+        except ImportError:
+            _has_rich_text = False
+
+        if _has_rich_text and isinstance(output, _Text):
             from .display import _console
             _console.print(output)
         else:
@@ -2013,7 +2018,7 @@ def register_cli(subparser: argparse.ArgumentParser) -> None:
     )
     logs_p.add_argument(
         "--since", default=None,
-        help="Show entries since timestamp (e.g. '2h', '30m')",
+        help="Show entries since date (YYYY-MM-DD)",
     )
     logs_p.add_argument(
         "-f", "--follow", action="store_true",

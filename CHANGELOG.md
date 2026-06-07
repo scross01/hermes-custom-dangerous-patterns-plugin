@@ -1,5 +1,11 @@
 # Change Log
 
+
+## 0.3.3
+
+- Handle missing rich dependency, prevent potential ImportErrors when rendering output.
+- Fix error in help for logs subcommand
+
 ## 0.3.2
 
 - **Security fix:** Replaced `tempfile.mktemp()` with `tempfile.NamedTemporaryFile()` in `_write_yaml()` to eliminate a TOCTOU race condition (CodeQL `py/insecure-temporary-file`). The atomic write pattern is preserved; the temp file is now created securely and cleaned up on all failure paths.
