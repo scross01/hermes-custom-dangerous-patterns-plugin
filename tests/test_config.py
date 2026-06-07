@@ -219,7 +219,7 @@ def test_validate_pattern_glob_only():
         "patterns",
     )
     assert result is not None
-    assert result["pattern"] == r"\becho\s+hello\b"
+    assert result["pattern"] == r"\becho(?!/)\s+hello\b"
     assert result["glob"] == "echo hello"
     assert result["description"] == "Echo hello"
 
@@ -292,7 +292,7 @@ def test_validate_pattern_glob_on_allow_patterns():
         "allow_patterns",
     )
     assert result is not None
-    assert result["pattern"] == r"\becho\s+allow\b"
+    assert result["pattern"] == r"\becho(?!/)\s+allow\b"
     assert result["glob"] == "echo allow"
 
 
@@ -306,7 +306,7 @@ def test_validate_pattern_glob_on_deny_patterns():
         "deny_patterns",
     )
     assert result is not None
-    assert result["pattern"] == r"\becho\s+deny\b"
+    assert result["pattern"] == r"\becho(?!/)\s+deny\b"
     assert result["glob"] == "echo deny"
 
 

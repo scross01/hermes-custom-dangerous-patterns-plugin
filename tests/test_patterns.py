@@ -342,7 +342,7 @@ def test_glob_to_regex_basic():
     """Simple two-word glob generates correct regex."""
     from patterns import glob_to_regex
 
-    assert glob_to_regex("echo hello") == r"\becho\s+hello\b"
+    assert glob_to_regex("echo hello") == r"\becho(?!/)\s+hello\b"
 
 
 def test_glob_to_regex_wildcard_end():
@@ -350,7 +350,7 @@ def test_glob_to_regex_wildcard_end():
     from patterns import glob_to_regex
 
     result = glob_to_regex("rm -rf /tmp/*")
-    assert result == r"\brm\s+-rf\s+/tmp/\S+"
+    assert result == r"\brm(?!/)\s+-rf\s+/tmp/\S+"
 
 
 def test_glob_to_regex_wildcard_both_ends():
@@ -366,7 +366,7 @@ def test_glob_to_regex_mid_wildcard():
     from patterns import glob_to_regex
 
     result = glob_to_regex("docker * rm")
-    assert result == r"\bdocker\s+\S+\s+rm\b"
+    assert result == r"\bdocker(?!/)\s+\S+\s+rm\b"
 
 
 def test_glob_to_regex_super_wildcard():
@@ -374,7 +374,7 @@ def test_glob_to_regex_super_wildcard():
     from patterns import glob_to_regex
 
     result = glob_to_regex("docker ** rm")
-    assert result == r"\bdocker\s+.*\s+rm\b"
+    assert result == r"\bdocker(?!/)\s+.*\s+rm\b"
 
 
 def test_glob_to_regex_brace_expansion():
@@ -383,7 +383,7 @@ def test_glob_to_regex_brace_expansion():
     from patterns import glob_to_regex
 
     result = glob_to_regex("ls *.{env,bak}")
-    assert result == r"\bls\s+(?:\S+\.env|\S+\.bak)"
+    assert result == r"\bls(?!/)\s+(?:\S+\.env|\S+\.bak)"
 
 
 def test_glob_to_regex_brace_expansion_simple():
@@ -391,7 +391,7 @@ def test_glob_to_regex_brace_expansion_simple():
     from patterns import glob_to_regex
 
     result = glob_to_regex("deploy {prod,staging}")
-    assert result == r"\bdeploy\s+(?:prod|staging)"
+    assert result == r"\bdeploy(?!/)\s+(?:prod|staging)"
 
 
 def test_glob_to_regex_brace_no_expansion_single():
@@ -399,7 +399,7 @@ def test_glob_to_regex_brace_no_expansion_single():
     from patterns import glob_to_regex
 
     result = glob_to_regex("echo {hello}")
-    assert result == r"\becho\s+\{hello\}"
+    assert result == r"\becho(?!/)\s+\{hello\}"
 
 
 def test_glob_to_regex_brace_no_expansion_empty():
@@ -407,7 +407,7 @@ def test_glob_to_regex_brace_no_expansion_empty():
     from patterns import glob_to_regex
 
     result = glob_to_regex("echo {}")
-    assert result == r"\becho\s+\{\}"
+    assert result == r"\becho(?!/)\s+\{\}"
 
 
 def test_glob_to_regex_lone_brace():
@@ -415,7 +415,7 @@ def test_glob_to_regex_lone_brace():
     from patterns import glob_to_regex
 
     result = glob_to_regex("echo {hello")
-    assert result == r"\becho\s+\{hello\b"
+    assert result == r"\becho(?!/)\s+\{hello\b"
 
 
 def test_glob_to_regex_question_mark():
@@ -423,7 +423,7 @@ def test_glob_to_regex_question_mark():
     from patterns import glob_to_regex
 
     result = glob_to_regex("chmod 7??")
-    assert result == r"\bchmod\s+7.."
+    assert result == r"\bchmod(?!/)\s+7.."
 
 
 def test_glob_to_regex_meta_chars():
@@ -447,7 +447,7 @@ def test_glob_to_regex_parentheses():
     from patterns import glob_to_regex
 
     result = glob_to_regex("python -c (.*)")
-    assert result == r"\bpython\s+-c\s+\(\.\S+\)"
+    assert result == r"\bpython(?!/)\s+-c\s+\(\.\S+\)"
 
 
 def test_glob_to_regex_empty():
@@ -461,7 +461,7 @@ def test_glob_to_regex_single_word():
     """Single word gets word boundaries."""
     from patterns import glob_to_regex
 
-    assert glob_to_regex("echo") == r"\becho\b"
+    assert glob_to_regex("echo") == r"\becho(?!/)\b"
 
 
 def test_glob_to_regex_whitespace_run():
@@ -469,7 +469,7 @@ def test_glob_to_regex_whitespace_run():
     from patterns import glob_to_regex
 
     result = glob_to_regex("git    push   --force")
-    assert result == r"\bgit\s+push\s+--force\b"
+    assert result == r"\bgit(?!/)\s+push\s+--force\b"
 
 
 def test_glob_to_regex_leading_trailing_spaces():
@@ -477,7 +477,7 @@ def test_glob_to_regex_leading_trailing_spaces():
     from patterns import glob_to_regex
 
     result = glob_to_regex("  echo hello  ")
-    assert result == r"\becho\s+hello\b"
+    assert result == r"\becho(?!/)\s+hello\b"
 
 
 def test_glob_to_regex_numeric_boundary():
@@ -485,7 +485,7 @@ def test_glob_to_regex_numeric_boundary():
     from patterns import glob_to_regex
 
     result = glob_to_regex("7z x")
-    assert result == r"\b7z\s+x\b"
+    assert result == r"\b7z(?!/)\s+x\b"
 
 
 def test_glob_to_regex_brackets():
@@ -493,7 +493,7 @@ def test_glob_to_regex_brackets():
     from patterns import glob_to_regex
 
     result = glob_to_regex("echo [hello]")
-    assert result == r"\becho\s+\[hello\]"
+    assert result == r"\becho(?!/)\s+\[hello\]"
 
 
 def test_glob_to_regex_compiles_valid_regex():
@@ -518,6 +518,10 @@ def test_glob_to_regex_compiles_valid_regex():
         "apt-get purge *",
         "kill -9",
         "$HOME/test",
+        "aws **",
+        "git push origin main",
+        "docker compose up -d",
+        "echo foo bar",
     ]
     for glob_in in test_cases:
         regex = glob_to_regex(glob_in)
@@ -578,6 +582,25 @@ def test_glob_to_regex_matches_as_expected():
         ("docker ** ps", "docker ps", False),  # ** in middle requires an arg
         ("docker * ps", "docker container ps", True),
         ("docker ** ps", "docker container ps", True),
+        # Path vs command distinction: first token must be followed
+        # by whitespace, not '/'.  Matches commands and binary paths
+        # but NOT directory components in a path.
+        ("aws **", "aws auth", True),
+        ("aws **", "/opt/bin/aws --help", True),
+        ("aws **", "./local/bin/aws instance create --help", True),
+        ("aws **", "/opt/aws/command list --help", False),
+        ("aws **", "aws/command list --help", False),
+        ("aws *", "/opt/bin/aws --help", True),
+        ("aws *", "/opt/aws/command --help", False),
+        ("aws", "aws", True),
+        ("aws", "/opt/bin/aws", True),
+        ("aws", "/opt/aws/command", False),
+        ("git **", "git status", True),
+        ("git **", "/usr/bin/git status", True),
+        ("git **", "/usr/git/status check", False),
+        # First token non-alphanumeric: no (?!/) injected
+        ("*danger*", "/danger/command", True),  # *danger* — no path restriction
+        (".hidden", "/opt/.hidden/command", True),  # starts with '.', not alnum
     ]
     for glob_in, command, should_match in cases:
         regex = glob_to_regex(glob_in)

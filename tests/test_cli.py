@@ -578,7 +578,7 @@ def test_cmd_validate_glob_mismatch_warning(monkeypatch, cli_module, tmp_path):
     assert "echo hello" in output  # glob value shown
     # Check that generated and stored patterns appear (use raw strings
     # so \\b and \\s are literal backslash sequences, not escape sequences)
-    assert r"\becho\s+hello\b" in output  # generated from glob "echo hello"
+    assert r"\becho(?!/)\s+hello\b" in output  # generated from glob "echo hello"
     assert r"\becho\s+world\b" in output   # stored pattern
 
 
@@ -598,7 +598,7 @@ def test_cmd_validate_glob_match_no_warning(monkeypatch, cli_module, tmp_path):
             "patterns": [
                 {
                     "glob": "echo hello",
-                    "pattern": r"\becho\s+hello\b",
+                    "pattern": r"\becho(?!/)\s+hello\b",
                     "description": "Match test",
                 },
             ],

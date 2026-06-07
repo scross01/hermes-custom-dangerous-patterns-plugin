@@ -172,6 +172,10 @@ def glob_to_regex(glob_str: str) -> str:
           wildcard are wrapped in ``(?:...)?`` so the bare command also
           matches (e.g. ``aws **`` matches ``aws`` and ``aws instance``).
         - ``\\b`` at start if first token starts with alphanumeric
+        - ``(?!/)`` after the first token if it starts with alphanumeric,
+          preventing the command name from matching directory components
+          (e.g. ``aws **`` matches ``/opt/bin/aws --help`` but not
+          ``/opt/aws/command``).
         - ``\\b`` at end if last token ends with alphanumeric
 
     Brace expansion (``{a,b}``) creates regex alternation: ``{a,b}`` becomes
@@ -287,6 +291,11 @@ def glob_to_regex(glob_str: str) -> str:
     # Use tokens (not raw glob_str) so leading/trailing whitespace
     # and special chars like * or ? are handled correctly.
     if tokens and tokens[0] and tokens[0][0].isalnum():
+        first_re = _process_token(tokens[0])
+        # Insert (?!/) after the first token so the command name matches
+        # when followed by whitespace but NOT by '/' — prevents matching
+        # directory components like /opt/aws/command (vs /opt/bin/aws --help).
+        regex_body = first_re + r"(?!/)" + regex_body[len(first_re):]
         regex_body = r"\b" + regex_body
     if tokens and tokens[-1] and tokens[-1][-1].isalnum():
         regex_body = regex_body + r"\b"
