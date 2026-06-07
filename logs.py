@@ -7,6 +7,7 @@ limit, and follow (tail -f) mode.
 
 from __future__ import annotations
 
+import json
 import re
 from datetime import datetime
 from pathlib import Path
@@ -14,6 +15,9 @@ from typing import Any
 
 # Default Hermes log directory (contains agent.log, errors.log, gateway.log, etc.)
 _DEFAULT_LOG_PATH = Path.home() / ".hermes" / "logs"
+
+# Match log filename (written by logfile.log_match)
+_MATCH_LOG_FILENAME = "custom-dangerous-patterns.log"
 
 # Pattern to identify plugin-specific log entries.
 # Matches the logger format used by the plugin: logger.info("custom-dangerous-patterns: ...")
@@ -29,20 +33,29 @@ def extract_logs(
     level: str | None = None,
     limit: int = 100,
     since: str | None = None,
+    include_match_log: bool = True,
 ) -> list[dict[str, Any]]:
-    """Extract plugin-specific log entries from all *.log files in the Hermes log directory.
+    """Extract plugin-specific log entries from Hermes logs and the match log.
 
-    Scans all *.log files under the Hermes log directory (not subdirectories).
-    Most recently modified files are scanned first.
+    Scans all ``*.log`` files under the Hermes log directory for
+    ``custom-dangerous-patterns:`` prefixed entries (Hermes's standard
+    Python logging). Also reads the dedicated match log
+    (``custom-dangerous-patterns.log``) if **include_match_log** is True.
+
+    All entries are merged, sorted chronologically (earliest first), and
+    the most recent **limit** entries are returned.
 
     Args:
-        log_path: Path to the Hermes log directory. Defaults to ~/.hermes/logs.
-        level: Minimum log level filter (e.g., "WARNING", "ERROR", "CRITICAL").
-        limit: Maximum number of entries to return (most recent first).
-        since: Date string (YYYY-MM-DD) for entries after this date.
+        log_path: Path to the Hermes log directory. Defaults to ``~/.hermes/logs``.
+        level: Minimum log level filter (e.g. ``"WARNING"``, ``"ERROR"``).
+        limit: Maximum number of entries to return (most recent, max 10000).
+        since: Date string (``YYYY-MM-DD``) for entries after this date.
+        include_match_log: Whether to include entries from the dedicated
+                           match log file. Defaults to True.
 
     Returns:
-        List of dicts with 'timestamp', 'level', and 'message' keys.
+        List of dicts with ``'timestamp'``, ``'level'``, and ``'message'`` keys,
+        sorted earliest to latest.
     """
     if log_path is None:
         log_path = _DEFAULT_LOG_PATH
@@ -52,15 +65,17 @@ def extract_logs(
 
     entries: list[dict[str, Any]] = []
     since_dt = _parse_since(since) if since else None
+    limit = min(limit, 10000)  # Sanity cap
 
     _level_rank = {"DEBUG": 0, "INFO": 1, "WARNING": 2, "ERROR": 3, "CRITICAL": 4}
     min_rank = _level_rank.get(level.upper(), 0) if level else 0
 
-    # Collect all *.log files, sorted by mtime ascending (oldest first)
-    # so entries accumulate chronologically; entries[-limit:][::-1]
-    # then correctly returns the most recent entries at the end.
+    # 1. Extract from Hermes *.log files (standard Python logging)
     log_files = sorted(
-        [f for f in log_path.glob("*.log") if f.is_file()],
+        [
+            f for f in log_path.glob("*.log") if f.is_file()
+            and f.name != _MATCH_LOG_FILENAME
+        ],
         key=lambda p: p.stat().st_mtime,
     )
 
@@ -95,13 +110,27 @@ def extract_logs(
                     entries.append({
                         "timestamp": ts_str.strip(),
                         "level": entry_level,
+                        "source": log_file.name,
                         "message": message,
                     })
         except OSError:
             continue
 
-    # Return most recent first, limited
-    return entries[-limit:][::-1]
+    # 2. Extract from the dedicated match log (JSONL)
+    if include_match_log:
+        try:
+            from .logfile import read_match_log_entries
+            match_entries = read_match_log_entries(
+                limit=limit,
+                since_dt=since_dt,
+            )
+            entries.extend(match_entries)
+        except ImportError:
+            pass  # Gracefully degrade if logfile module isn't available
+
+    # 3. Sort chronologically (earliest first), return most recent `limit`
+    entries.sort(key=lambda e: e["timestamp"])
+    return entries[-limit:]
 
 
 def follow_logs(log_path: Path | None = None) -> None:
@@ -154,17 +183,36 @@ def format_log_entries(
 ) -> list[str]:
     """Format log entries for display.
 
-    Returns a list of strings ready for printing.
+    Entries from the Hermes standard log are labelled ``[Plugin]``.
+    Entries from the dedicated match log (``MATCH`` level) are labelled
+    ``[Match]`` to distinguish them visually.
+
+    Returns a list of :class:`rich.text.Text` objects ready for printing,
+    earliest first.  Using ``Text`` avoids Rich markup misinterpreting
+    square brackets in source filenames (e.g. ``[agent.log]``).
     """
+    from rich.text import Text
+
     if not entries:
         return ["No plugin-specific log entries found."]
 
-    lines: list[str] = []
+    lines = []
     for entry in entries:
         ts = entry["timestamp"]
         lvl = entry["level"]
         msg = entry["message"]
-        lines.append(f"[{ts}] [{lvl}] [Plugin] {msg}")
+        src = entry.get("source", "")
+
+        t = Text()
+        t.append(f"[{ts}] ")
+        if src:
+            t.append(f"[{src}]")
+            t.append(" ")
+        if lvl == "MATCH":
+            t.append(f"[{lvl}] [Match] {msg}")
+        else:
+            t.append(f"[{lvl}] [Plugin] {msg}")
+        lines.append(t)
 
     return lines
 

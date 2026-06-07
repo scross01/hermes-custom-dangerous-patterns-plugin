@@ -26,6 +26,12 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
+try:
+    from .logfile import log_match
+except ImportError:
+    def log_match(*args: Any, **kwargs: Any) -> None:  # type: ignore[misc]
+        pass
+
 
 def register(ctx: Any) -> None:
     """Plugin entry point. Called by Hermes at startup."""
@@ -63,6 +69,14 @@ def register(ctx: Any) -> None:
             "DANGEROUS_PATTERNS",
             block_count,
         )
+
+        # Patch detect_dangerous_command to log block matches to the
+        # dedicated log file, even when no allow patterns exist.
+        # (When allow patterns ARE enabled, _patch_detect_function
+        # already handles block logging.)
+        allow_patterns = config.get("allow_patterns", [])
+        if not (allow_patterns and any(p.get("enabled", True) for p in allow_patterns)):
+            _patch_block_logging()
 
     # 3. Monkey-patch detect_dangerous_command for allow patterns
     allow_patterns = config.get("allow_patterns", [])
@@ -145,6 +159,80 @@ def _register_cli(ctx: Any) -> None:
 # ---------------------------------------------------------------------------
 
 
+def _patch_block_logging() -> None:
+    """Wrap detect_dangerous_command to log block matches to the dedicated log file.
+
+    Runs regardless of whether allow patterns exist. Calls _log_block_matches()
+    before falling through to the original detection.
+    """
+    from tools import approval
+
+    _original = approval.detect_dangerous_command
+
+    def _patched(command: str) -> tuple[bool, str | None, str | None]:
+        _log_block_matches(command)
+        return _original(command)
+
+    _patched.__name__ = "detect_dangerous_command"
+    _patched.__qualname__ = "detect_dangerous_command"
+    approval.detect_dangerous_command = _patched
+
+
+def _log_allow_match(command: str) -> None:
+    """Find and log the matching allow pattern's info.
+
+    Silently degrades (no-op) when the ``patterns`` module is not importable
+    (e.g., in test environments without a package context).
+    """
+    try:
+        from .patterns import _allow_compiled, _normalize
+    except ImportError:
+        return
+    cmd_norm = _normalize(command)
+    for allow_re, allow_desc in _allow_compiled:
+        if allow_re.search(cmd_norm):
+            log_match(command, "allow", allow_desc, allow_re.pattern)
+            return
+
+
+def _log_block_matches(command: str) -> None:
+    """Log all matching block pattern's info.
+
+    These are logged BEFORE the approval prompt, so the user's selection
+    (once/session/always/deny) is not yet known. Capturing the selection
+    would require monkey-patching Hermes's internal prompt handler
+    (e.g. ``approval.perform_approval``), which is fragile and version-
+    dependent — the user request indicated "if possible", acknowledging
+    this limitation.
+
+    Silently degrades (no-op) when the ``patterns`` module is not importable.
+    """
+    try:
+        from .patterns import _block_compiled, _normalize
+    except ImportError:
+        return
+    cmd_norm = _normalize(command)
+    for block_re, block_desc in _block_compiled:
+        if block_re.search(cmd_norm):
+            log_match(command, "block", block_desc, block_re.pattern)
+
+
+def _log_deny_match(command: str) -> None:
+    """Find and log the matching deny pattern's info.
+
+    Silently degrades (no-op) when the ``patterns`` module is not importable.
+    """
+    try:
+        from .patterns import _deny_compiled, _normalize
+    except ImportError:
+        return
+    cmd_norm = _normalize(command)
+    for deny_re, deny_desc in _deny_compiled:
+        if deny_re.search(cmd_norm):
+            log_match(command, "deny", deny_desc, deny_re.pattern)
+            return
+
+
 def _patch_detect_function(allow_checker) -> None:
     """Wrap detect_dangerous_command to skip commands matching allow patterns.
 
@@ -160,6 +248,8 @@ def _patch_detect_function(allow_checker) -> None:
         # Check allow patterns first
         allow_match = allow_checker(command)
         if allow_match is not None:
+            # Log the allow match with pattern details
+            _log_allow_match(command)
             logger.debug(
                 "custom-dangerous-patterns: command exempt via allow pattern "
                 "(%s): %s",
@@ -167,6 +257,11 @@ def _patch_detect_function(allow_checker) -> None:
                 command[:80],
             )
             return (False, None, None)
+
+        # Log block pattern matches before falling through to original
+        # (the original will also find them in DANGEROUS_PATTERNS_COMPILED
+        # and trigger the approval prompt)
+        _log_block_matches(command)
 
         # Fall through to original detection (our injected patterns are
         # already in DANGEROUS_PATTERNS_COMPILED at this point)
@@ -215,6 +310,8 @@ def _patch_deny_handler(deny_checker, allow_checker=None) -> None:
         # Check deny patterns before the original guard runs.
         deny_match = deny_checker(command)
         if deny_match is not None:
+            # Log the deny match with pattern details
+            _log_deny_match(command)
             logger.info(
                 "custom-dangerous-patterns: command blocked by deny pattern "
                 "(%s): %s",
@@ -280,6 +377,8 @@ def _make_deny_hook(deny_checker, allow_checker=None):
         # Check deny patterns
         deny_match = deny_checker(command)
         if deny_match is not None:
+            # Log the deny match with pattern details
+            _log_deny_match(command)
             return {
                 "action": "block",
                 "message": (
@@ -327,6 +426,8 @@ def _patch_detect_function_for_deny(deny_checker, allow_checker=None) -> None:
         # Then check deny patterns
         deny_match = deny_checker(command)
         if deny_match is not None:
+            # Log the deny match with pattern details
+            _log_deny_match(command)
             logger.info(
                 "custom-dangerous-patterns: command blocked by deny pattern "
                 "(%s): %s",

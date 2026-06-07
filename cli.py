@@ -984,7 +984,13 @@ def cmd_logs(
     since: str | None = None,
     follow: bool = False,
 ) -> tuple[str, int]:
-    """Show plugin-specific log entries from the Hermes log."""
+    """Show plugin-specific log entries from the Hermes log and match log.
+
+    Reads from both Hermes's standard Python log (filtered for
+    ``custom-dangerous-patterns:`` entries) **and** the dedicated
+    match log at ``~/.hermes/logs/custom-dangerous-patterns.log``
+    (JSONL format). Entries are merged and sorted earliest-to-latest.
+    """
     from .logs import extract_logs, follow_logs, format_log_entries, get_default_log_path
     from .display import muted, cross
 
@@ -997,9 +1003,11 @@ def cmd_logs(
             1,
         )
 
-    # Check for any *.log files
+    # Check for any *.log files or the match log
     log_files = sorted(log_path.glob("*.log"))
-    if not log_files:
+    match_log = log_path / "custom-dangerous-patterns.log"
+    has_match_log = match_log.is_file()
+    if not log_files and not has_match_log:
         return (
             f"[error]✗[/error] No *.log files found in [path]{log_path}[/path]\n"
             f"Logs are only available when Hermes has been run at least once.\n",
@@ -1012,11 +1020,18 @@ def cmd_logs(
 
     entries = extract_logs(log_path=log_path, level=level, limit=limit, since=since)
     lines = format_log_entries(entries, level=level)
-    # Add a note about which files were scanned
-    file_list = ", ".join(f.name for f in log_files)
-    lines.append("")
-    lines.append(muted(f"Scanned: {len(log_files)} log file(s) — {file_list}"))
-    return ("\n".join(lines) + "\n", 0)
+    # Add a note about which files were scanned (stays as Rich markup string)
+    source_parts = []
+    if log_files:
+        file_list = ", ".join(f.name for f in log_files)
+        source_parts.append(f"{len(log_files)} log file(s) ({file_list})")
+    if has_match_log:
+        source_parts.append(f"match log ({match_log.name})")
+    footer = muted(f"Sources: {'; '.join(source_parts)}") if source_parts else ""
+    # Return Text lines and footer separately
+    from rich.text import Text as _Text
+    combined = _Text("\n").join(lines) if lines else _Text()
+    return (combined, footer, 0)
 
 
 def cmd_add(
@@ -1702,13 +1717,13 @@ def _handle_info(args: Any) -> None:
 
 
 def _handle_logs(args: Any) -> None:
-    output, exit_code = cmd_logs(
+    output, footer, exit_code = cmd_logs(
         level=getattr(args, "level", None),
         limit=getattr(args, "limit", 100),
         since=getattr(args, "since", None),
         follow=getattr(args, "follow", False),
     )
-    _emit(output, exit_code)
+    _emit(output, exit_code, footer=footer)
 
 
 def _handle_add(args: Any) -> None:
@@ -1737,17 +1752,29 @@ def _handle_remove(args: Any) -> None:
     _emit(output, exit_code)
 
 
-def _emit(output: str, exit_code: int) -> None:
+def _emit(output, exit_code: int, footer: str = "") -> None:
     """Print output and exit with the given code.
 
     Renders Rich markup through the display module's Console so that
     styled output (colours, headings) appears on TTYs and degrades
     gracefully to plain text when piped or not a TTY.
+
+    If *output* is a :class:`rich.text.Text` object it is printed
+    directly (no markup re-parsing), preserving literal brackets.
+    The optional *footer* string is printed afterwards via normal
+    Rich markup rendering.
     """
     if output:
+        from rich.text import Text as _Text
+        if isinstance(output, _Text):
+            from .display import _console
+            _console.print(output)
+        else:
+            from .display import render_and_print
+            render_and_print(output)
+    if footer:
         from .display import render_and_print
-
-        render_and_print(output)
+        render_and_print("\n" + footer)
     sys.exit(exit_code)
 
 
