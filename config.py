@@ -243,13 +243,6 @@ def _validate_pattern(entry: Any, index: int, field: str) -> dict[str, str] | No
         generated = glob_to_regex(glob_str.strip())
         if generated:
             pattern = generated
-            logger.info(
-                "custom-dangerous-patterns: %s[%d] auto-generated pattern %r from glob %r",
-                field,
-                index,
-                pattern,
-                glob_str,
-            )
         else:
             logger.warning(
                 "custom-dangerous-patterns: %s[%d] glob %r produced empty regex — skipping",
