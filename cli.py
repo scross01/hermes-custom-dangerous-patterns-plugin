@@ -311,12 +311,12 @@ def cmd_init(
     """Create a starter config directory and guide the user.
 
     Creates ~/.hermes/custom-dangerous-patterns/ (a directory) with
-    starter patterns. All patterns are DISABLED by default — the user
-    must review and enable the ones they want. Use --with-examples for
-    a fully-enabled demonstration config.
+    starter patterns. Test patterns are DISABLED by default — the user
+    must review and enable them. Use --with-examples to also copy all
+    files from the bundled ``examples/`` directory (enabled by default).
 
     Args:
-        with_examples: Include fully-enabled example patterns.
+        with_examples: Copy all bundled example files into the config.
         force: Overwrite existing config without asking.
     """
     from .config import resolve_config_path
@@ -337,52 +337,33 @@ def cmd_init(
                 1,
             )
 
-    # Load the example config template
-    if with_examples:
-        config_dict = _load_example_config(enabled=True)
-    else:
-        config_dict = _build_minimal_starter_config()
-
-    # Count patterns for the output message
-    block_count = len(config_dict.get("patterns", []))
-    allow_count = len(config_dict.get("allow_patterns", []))
-    deny_count = len(config_dict.get("deny_patterns", []))
-
     config_path.mkdir(parents=True, exist_ok=True)
 
+    # Always write the test config (disabled)
+    test_config = _build_minimal_starter_config()
+    _write_init_yaml(test_config, config_path / "00-test.yaml")
+    saved_files = ["00-test.yaml"]
+
+    total_block = len(test_config.get("patterns", []))
+    total_allow = len(test_config.get("allow_patterns", []))
+    total_deny = len(test_config.get("deny_patterns", []))
+
     if with_examples:
-        # Write test patterns (always disabled) to 00-test.yaml
-        test_config = _build_minimal_starter_config()
-        _write_init_yaml(test_config, config_path / "00-test.yaml")
-
-        saved_files = ["00-test.yaml"]
-
-        # Write example patterns (fully enabled) to 01-examples.yaml.
-        # Guard against the fallback case where _load_example_config returns
-        # the test config (example file not found) — skip to avoid duplicates.
-        is_fallback = (
-            config_dict.get("patterns", []) == test_config.get("patterns", [])
-            and config_dict.get("deny_patterns", []) == test_config.get("deny_patterns", [])
-        )
-        if not is_fallback:
-            _write_init_yaml(config_dict, config_path / "01-examples.yaml")
-            saved_files.append("01-examples.yaml")
-            # Add test pattern counts to the example counts already tallied
-            block_count += len(test_config.get("patterns", []))
-            allow_count += len(test_config.get("allow_patterns", []))
-            deny_count += len(test_config.get("deny_patterns", []))
-    else:
-        target = config_path / "00-test.yaml"
-        _write_init_yaml(config_dict, target)
-        saved_files = ["00-test.yaml"]
+        # Copy all bundled example files (enabled by default — no `enabled: false`)
+        example_files = _copy_example_files(config_path)
+        for fname, b, a, d in example_files:
+            saved_files.append(fname)
+            total_block += b
+            total_allow += a
+            total_deny += d
 
     lines = [
-        success(f"Created: [path]{config_path}/[/path] [dim]({', '.join(saved_files)})[/dim]"),
-        f"  [dim]{block_count} block, {allow_count} allow, {deny_count} deny patterns — all disabled[/dim]",
+        success(f"Created: [path]{config_path}/[/path] [dim]({', '.join(sorted(saved_files))})[/dim]"),
+        f"  [dim]{total_block} block, {total_allow} allow, {total_deny} deny patterns[/dim]",
         "",
         "[bold]Next steps:[/bold]",
         "  1. Review the config: [bold]hermes custom-dangerous-patterns list[/bold]",
-        "  2. Enable patterns: [bold]hermes custom-dangerous-patterns enable --group testing[/bold]",
+        "  2. Enable test patterns: [bold]hermes custom-dangerous-patterns enable --group testing[/bold]",
         "  3. Add new patterns: [bold]hermes custom-dangerous-patterns add[/bold]",
         "  4. Restart Hermes for changes to take effect",
     ]
@@ -432,40 +413,61 @@ def _build_minimal_starter_config() -> dict[str, Any]:
     }
 
 
-def _load_example_config(enabled: bool = True) -> dict[str, Any]:
-    """Load the example config from the plugin's examples directory.
+def _copy_example_files(config_path: Path) -> list[tuple[str, int, int, int]]:
+    """Copy all bundled example YAML files into the config directory.
 
-    Tries to load from the installed plugin path first, then falls back
-    to the built-in minimal config.
+    Discovers ``*.yaml`` files in the plugin's ``examples/`` directory
+    (excluding ``00-test.yaml``) and copies each as-is into
+    *config_path*. Patterns are written with their original enabled
+    state — the example files are enabled by default.
+
+    Returns a list of ``(filename, block_count, allow_count, deny_count)``
+    tuples for the init output message.
     """
-    # Try the shipped examples file
-    example_paths = [
-        Path(__file__).resolve().parent / "examples" / "01-examples.yaml",
-        Path.home() / ".hermes" / "plugins" / "custom-dangerous-patterns"
-        / "examples" / "01-examples.yaml",
+    from .config import _load_single_yaml, _validate_config, _write_yaml, _clean_for_serialization
+
+    # Try the shipped examples directory first, then the installed plugin path
+    candidates = [
+        Path(__file__).resolve().parent / "examples",
+        Path.home() / ".hermes" / "plugins" / "custom-dangerous-patterns" / "examples",
     ]
 
-    for example_path in example_paths:
-        if example_path.is_file():
-            try:
-                from .config import _load_single_yaml
+    examples_dir = next((p for p in candidates if p.is_dir()), None)
+    if examples_dir is None:
+        return []
 
-                raw = _load_single_yaml(example_path)
-                if raw:
-                    from .config import _validate_config
+    saved: list[tuple[str, int, int, int]] = []
 
-                    config = _validate_config(raw)
-                    # Set enabled/disabled based on flag
-                    if not enabled:
-                        for section in ("patterns", "allow_patterns", "deny_patterns"):
-                            for entry in config.get(section, []):
-                                entry["enabled"] = False
-                    return config
-            except Exception:
-                pass
+    for yaml_file in sorted(examples_dir.glob("*.yaml")):
+        if yaml_file.name == "00-test.yaml":
+            continue  # Handled separately by cmd_init
 
-    # Fallback: minimal starter config
-    return _build_minimal_starter_config()
+        raw = _load_single_yaml(yaml_file)
+        if not raw:
+            continue
+
+        try:
+            config = _validate_config(raw)
+        except Exception:
+            continue
+
+        # Write the file (preserving original enabled state)
+        output: dict[str, Any] = {}
+        for key in ("patterns", "allow_patterns", "deny_patterns"):
+            entries = config.get(key, [])
+            if entries:
+                output[key] = _clean_for_serialization(entries)
+
+        if output:
+            target_path = config_path / yaml_file.name
+            _write_yaml(output, target_path)
+
+            block_count = len(config.get("patterns", []))
+            allow_count = len(config.get("allow_patterns", []))
+            deny_count = len(config.get("deny_patterns", []))
+            saved.append((yaml_file.name, block_count, allow_count, deny_count))
+
+    return saved
 
 
 def cmd_enable(

@@ -1,0 +1,57 @@
+patterns:
+  # --- Infrastructure as Code ---
+  - description: opentofu apply/destroy (infrastructure changes)
+    group: infra
+    glob: opentofu {apply,destroy,import,state} **
+
+  # --- Configuration Management ---
+  - description: ansible-playbook (remote execution)
+    group: infra
+    glob: ansible-playbook **
+
+  - description: ansible ad-hoc shell commands
+    group: infra
+    glob: ansible ** -m shell **
+
+  - description: ansible ad-hoc command module
+    group: infra
+    glob: ansible ** -a **
+
+  # --- Container Runtimes (beyond built-in docker lifecycle) ---
+  - description: docker run with privileged flag
+    group: infra
+    glob: docker run ** --privileged**
+
+  - description: docker run mounting root filesystem
+    group: infra
+    glob: docker run ** -v /:**
+
+  - description: docker run mounting /etc
+    group: infra
+    glob: docker run ** -v /etc:**
+
+  - description: podman destructive subcommands
+    group: infra
+    glob: podman {rm,rmi,stop,kill} **
+
+  - description: podman run with privileged flag
+    group: infra
+    glob: podman run ** --privileged**
+
+  # --- VM Lifecycle ---
+  - description: colima stop/delete
+    group: infra
+    glob: colima {stop,delete,destroy}
+
+  - description: limactl stop/delete
+    group: infra
+    glob: limactl {stop,delete}
+
+  # --- TLS/Certificate Management ---
+  - description: certbot delete/revoke/unregister
+    group: infra
+    glob: certbot {delete,revoke,unregister} **
+
+  - description: certbot force renewal
+    group: infra
+    glob: certbot renew --force-renewal

@@ -1,0 +1,13 @@
+patterns:
+  - description: aws
+    group: cloud
+    glob: aws **
+  - description: azure-cli
+    group: cloud
+    glob: az **
+  - description: gcloud
+    group: cloud
+    glob: gcloud **
+  - description: vultr
+    group: cloud
+    glob: vultr **

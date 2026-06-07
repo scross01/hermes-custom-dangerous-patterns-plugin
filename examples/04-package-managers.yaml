@@ -1,0 +1,53 @@
+patterns:
+  # --- Homebrew ---
+  - description: brew install/uninstall/remove
+    group: package-managers
+    glob: brew {install,uninstall,remove} **
+
+  - description: brew upgrade/cleanup
+    group: package-managers
+    glob: brew {upgrade,cleanup} **
+
+  # --- npm (global) ---
+  - description: npm install/uninstall -g
+    group: package-managers
+    glob: npm {install,uninstall} -g **
+
+  - description: npm -g install/uninstall
+    group: package-managers
+    glob: npm -g {install,uninstall,add} **
+
+  # --- yarn (global) ---
+  - description: yarn global add/remove
+    group: package-managers
+    glob: yarn global {add,remove} **
+
+  # --- uv tool ---
+  - description: uv tool install/uninstall
+    group: package-managers
+    glob: uv tool {install,uninstall} **
+
+  # --- pipx ---
+  - description: pipx install/uninstall/upgrade
+    group: package-managers
+    glob: pipx {install,uninstall,upgrade,upgrade-all}
+
+  # --- cargo (Rust) ---
+  - description: cargo install/uninstall
+    group: package-managers
+    glob: cargo {install,uninstall} **
+
+  # --- go ---
+  - description: go install
+    group: package-managers
+    glob: go install **
+
+  # --- pip (global) ---
+  - description: pip install/uninstall
+    group: package-managers
+    glob: pip {install,uninstall} **
+
+  # --- gem (Ruby) ---
+  - description: gem install/uninstall
+    group: package-managers
+    glob: gem {install,uninstall} **

@@ -1,0 +1,47 @@
+patterns:
+  # --- Backup Tools ---
+  - description: restic forget/prune (backup deletion)
+    group: tools
+    glob: restic {forget,prune,rewrite,repair} **
+
+  # --- File Sync (destructive flags) ---
+  - description: rsync with --delete (mirror-delete)
+    group: tools
+    glob: rsync ** --delete**
+
+  - description: rclone delete/purge/move (cloud data destruction)
+    group: tools
+    glob: rclone {delete,purge,move,moveto,copyto,sync} **
+
+  # --- Network Scanning ---
+  - description: nmap (network scanning)
+    group: tools
+    glob: nmap **
+
+  # --- Proxy/Anonymization ---
+  - description: torsocks (traffic routing through Tor)
+    group: tools
+    glob: torsocks **
+
+  - description: proxychains (traffic routing through proxies)
+    group: tools
+    glob: proxychains **
+
+  # --- Screen Sharing ---
+  - description: scrcpy (screen mirroring/remote control)
+    group: tools
+    glob: scrcpy **
+
+  # --- Secrets Scanning (data exfil risk) ---
+  - description: trufflehog filesystem scan
+    group: tools
+    glob: trufflehog filesystem **
+
+  - description: trufflehog git scan
+    group: tools
+    glob: trufflehog git **
+
+  # --- Antivirus (quarantine capable) ---
+  - description: clamscan with --move (quarantine)
+    group: tools
+    glob: clamscan ** --move=**
