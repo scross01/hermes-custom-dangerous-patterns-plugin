@@ -1,6 +1,6 @@
 # Custom Dangerous Patterns plugin for Hermes Agent
 
-> **⚠️ EXPERIMENTAL — USE AT YOUR OWN RISK**
+> **⚠️ USE AT YOUR OWN RISK**
 >
 > This plugin is in **early development** and has not been rigorously tested
 > across all Hermes environments, versions, or edge cases. There is **no
