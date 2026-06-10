@@ -51,3 +51,46 @@ patterns:
   - description: gem install/uninstall
     group: package-managers
     glob: gem {install,uninstall} **
+
+  # --- npx (remote package execution) ---
+  - description: npx execute remote package
+    group: package-managers
+    glob: npx **
+
+  # --- uvx (remote package execution) ---
+  - description: uvx execute remote package
+    group: package-managers
+    glob: uvx **
+
+  # --- bunx (remote package execution) ---
+  - description: bunx execute remote package
+    group: package-managers
+    glob: bunx **
+
+  # --- pnpm pnpx / dlx (remote package execution) ---
+  - description: pnpx execute remote package
+    group: package-managers
+    glob: pnpx **
+  - description: pnpm dlx execute remote package
+    group: package-managers
+    glob: pnpm dlx **
+
+  # --- pipx run (remote execution) ---
+  - description: pipx run remote package
+    group: package-managers
+    glob: pipx run **
+
+  # --- go run (remote module execution) ---
+  - description: go run remote module
+    group: package-managers
+    glob: go run **
+
+  # --- gem exec (remote execution) ---
+  - description: gem exec remote command
+    group: package-managers
+    glob: gem exec **
+
+  # --- deno run (remote script/module execution) ---
+  - description: deno run remote script
+    group: package-managers
+    glob: deno run **
