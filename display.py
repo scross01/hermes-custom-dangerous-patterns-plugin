@@ -18,11 +18,11 @@ from typing import Any
 # ── Rich availability check ──────────────────────────────────────────────
 
 try:
+    from rich import box
     from rich.console import Console
     from rich.panel import Panel
     from rich.text import Text
     from rich.theme import Theme
-    from rich import box
 
     _has_rich = True
 except ImportError:

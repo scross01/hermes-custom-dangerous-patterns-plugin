@@ -620,7 +620,8 @@ def _compute_delta(
 
     Keys are compared by pattern regex string. Entries present in
     merged but not in user files are new. Entries with the same
-    pattern but different fields are modified. Entries    removed from user files (not in merged) are written with enabled=False
+    pattern but different fields are modified. Entries removed from
+    user files (not in merged) are written with enabled=False
     to prevent them from reappearing on reload.
     """
     delta: dict[str, list[dict[str, Any]]] = {}

@@ -82,7 +82,7 @@ def read_match_log_entries(
     entries: list[dict[str, Any]] = []
 
     try:
-        with open(_LOG_FILE, "r", encoding="utf-8") as f:
+        with open(_LOG_FILE, encoding="utf-8") as f:
             for line in f:
                 line = line.strip()
                 if not line:

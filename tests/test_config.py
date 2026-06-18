@@ -697,6 +697,7 @@ def test_integrity_check_directory_mode(
     reset_config_cache, mock_hermes_constants, tmp_hermes_home, caplog,
 ):
     import json
+
     from config import load_config
 
     config_dir = tmp_hermes_home / "custom-dangerous-patterns"

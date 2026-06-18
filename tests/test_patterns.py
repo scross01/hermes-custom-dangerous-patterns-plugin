@@ -378,7 +378,7 @@ def test_glob_to_regex_super_wildcard():
 
 
 def test_glob_to_regex_brace_expansion():
-    """Brace expansion with prefix: each alt includes the prefix
+    r"""Brace expansion with prefix: each alt includes the prefix
     (*.{env,bak} → *.{env,bak} → each alt glob-processed as \S+\.ext)."""
     from patterns import glob_to_regex
 
