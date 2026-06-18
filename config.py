@@ -998,6 +998,22 @@ def _check_config_integrity(
     _save_hash_data(hash_path, new_data)
 
 
+def _load_raw_config_text(config_path: Path) -> str:
+    if config_path.is_file():
+        return config_path.read_text(encoding="utf-8")
+
+    if config_path.is_dir():
+        parts: list[str] = []
+        sibling = config_path.parent / (config_path.stem + ".yaml")
+        if sibling.is_file():
+            parts.append(sibling.read_text(encoding="utf-8"))
+        for yf in sorted(config_path.glob("*.yaml")):
+            parts.append(yf.read_text(encoding="utf-8"))
+        return "\n".join(parts)
+
+    return ""
+
+
 def load_config(force: bool = False, integrity_check: bool = True) -> dict[str, Any]:
     """Load, validate, and cache the custom patterns config.
 
@@ -1022,13 +1038,17 @@ def load_config(force: bool = False, integrity_check: bool = True) -> dict[str, 
         result = {"patterns": [], "allow_patterns": [], "deny_patterns": []}
     else:
         result = _validate_config(raw)
-        # Run integrity checks if config loaded successfully
-        if integrity_check and path.is_file():
+        if integrity_check:
             try:
-                raw_text = path.read_text(encoding="utf-8")
-                _check_config_integrity(path, raw_text, result, integrity_check)
+                raw_text = _load_raw_config_text(path)
+                if raw_text:
+                    _check_config_integrity(path, raw_text, result, integrity_check)
             except OSError:
-                pass  # Can't read for hashing — skip integrity check silently
+                logger.warning(
+                    "custom-dangerous-patterns: unable to read config for "
+                    "integrity check at %s",
+                    path,
+                )
 
     n_block = len(result["patterns"])
     n_allow = len(result["allow_patterns"])

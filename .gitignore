@@ -14,4 +14,6 @@ uv.lock
 .ruff_cache/
 .plans
 .rtk
-CLAUDE.mdwiki/
+CLAUDE.md
+wiki/
+plans/

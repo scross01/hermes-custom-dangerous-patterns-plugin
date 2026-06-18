@@ -23,7 +23,7 @@ def test_resolve_default_path_no_hermes_constants(monkeypatch, tmp_path):
         from config import _resolve_config_path
 
         result = _resolve_config_path()
-    assert result == tmp_path / ".hermes" / "custom-dangerous-patterns.yaml"
+    assert result == tmp_path / ".hermes" / "custom-dangerous-patterns"
 
 
 def test_resolve_path_with_hermes_constants(mock_hermes_constants, tmp_hermes_home):
@@ -31,7 +31,7 @@ def test_resolve_path_with_hermes_constants(mock_hermes_constants, tmp_hermes_ho
     from config import _resolve_config_path
 
     result = _resolve_config_path()
-    assert result == tmp_hermes_home / "custom-dangerous-patterns.yaml"
+    assert result == tmp_hermes_home / "custom-dangerous-patterns"
 
 
 def test_resolve_path_env_var(monkeypatch, tmp_path):
@@ -655,6 +655,71 @@ def test_load_config_skip_integrity(reset_config_cache, config_with_content, moc
 
     result = load_config(integrity_check=False)
     assert len(result["patterns"]) == 2
+
+
+def test_load_raw_config_text_single_file(tmp_path):
+    from config import _load_raw_config_text
+
+    path = tmp_path / "config.yaml"
+    path.write_text("patterns:\n  - pattern: test", encoding="utf-8")
+    result = _load_raw_config_text(path)
+    assert "test" in result
+
+
+def test_load_raw_config_text_directory(tmp_path):
+    from config import _load_raw_config_text
+
+    d = tmp_path / "config.d"
+    d.mkdir()
+    (d / "10-cloud.yaml").write_text("patterns:\n  - pattern: aws", encoding="utf-8")
+    (d / "00-base.yaml").write_text("patterns:\n  - pattern: base", encoding="utf-8")
+    result = _load_raw_config_text(d)
+    assert "base" in result
+    assert "aws" in result
+    assert result.index("base") < result.index("aws")
+
+
+def test_load_raw_config_text_empty_dir(tmp_path):
+    from config import _load_raw_config_text
+
+    d = tmp_path / "empty.d"
+    d.mkdir()
+    assert _load_raw_config_text(d) == ""
+
+
+def test_load_raw_config_text_missing(tmp_path):
+    from config import _load_raw_config_text
+
+    assert _load_raw_config_text(tmp_path / "nonexistent") == ""
+
+
+def test_integrity_check_directory_mode(
+    reset_config_cache, mock_hermes_constants, tmp_hermes_home, caplog,
+):
+    import json
+    from config import load_config
+
+    config_dir = tmp_hermes_home / "custom-dangerous-patterns"
+    config_dir.mkdir()
+    (config_dir / "10-test.yaml").write_text(
+        "patterns:\n  - pattern: '\\btest\\b'\n    description: 'Test pattern'\n",
+        encoding="utf-8",
+    )
+
+    hash_path = tmp_hermes_home / ".custom-patterns-hash"
+    hash_path.write_text(
+        json.dumps({
+            "config_hash": "aaaa",
+            "pattern_counts": {"patterns": 0, "allow_patterns": 0, "deny_patterns": 0},
+        }),
+        encoding="utf-8",
+    )
+
+    with caplog.at_level("WARNING"):
+        result = load_config()
+
+    assert len(result["patterns"]) == 1
+    assert any("CONFIG CHANGED" in r.message for r in caplog.records)
 
 
 # ---------------------------------------------------------------------------

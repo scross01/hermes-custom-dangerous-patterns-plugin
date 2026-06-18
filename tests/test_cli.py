@@ -693,3 +693,49 @@ def test_format_builtins_with_search(cli_module):
     lines_filtered = cli_module._format_builtins(search_term="docker")
     assert len(lines_filtered) < len(lines_all)
     assert any("docker" in line.lower() for line in lines_filtered)
+
+
+# ---------------------------------------------------------------------------
+# Allow shadowing checks
+# ---------------------------------------------------------------------------
+
+
+def test_add_allow_pattern_shadowing_warning(cli_module):
+    """Broad allow pattern that shadows built-ins triggers warning."""
+    config = {
+        "patterns": [],
+        "allow_patterns": [
+            {"pattern": r"\bdocker\b", "description": "Allow docker", "enabled": True},
+        ],
+        "deny_patterns": [],
+    }
+    warnings = cli_module._check_allow_shadowing_for_cli(config)
+    assert len(warnings) > 0
+    assert any("shadow" in w.lower() for w in warnings)
+    assert any("docker" in w.lower() for w in warnings)
+
+
+def test_add_block_pattern_no_shadowing_warning(cli_module):
+    """Block pattern produces no shadowing warnings."""
+    config = {
+        "patterns": [
+            {"pattern": r"\bvultr\b", "description": "Vultr", "enabled": True},
+        ],
+        "allow_patterns": [],
+        "deny_patterns": [],
+    }
+    warnings = cli_module._check_allow_shadowing_for_cli(config)
+    assert len(warnings) == 0
+
+
+def test_add_allow_pattern_no_shadowing(cli_module):
+    """Narrow allow pattern that doesn't shadow built-ins produces no warnings."""
+    config = {
+        "patterns": [],
+        "allow_patterns": [
+            {"pattern": r"\bmyapp\s+read\b", "description": "MyApp read", "enabled": True},
+        ],
+        "deny_patterns": [],
+    }
+    warnings = cli_module._check_allow_shadowing_for_cli(config)
+    assert len(warnings) == 0

@@ -40,7 +40,7 @@ def cmd_list(
     config_path = resolve_config_path()
     config = load_config(force=True, integrity_check=False)
 
-    from .display import subheading, pattern_entry, muted, path_info, _s
+    from .display import pattern_entry, path_info, _s
 
     if not config_path.exists():
         return (
@@ -59,22 +59,6 @@ def cmd_list(
     lines: list[str] = []
     lines.append(path_info("Config", path_display))
     lines.append("")
-
-    # Build title with filter context
-    filter_desc = ""
-    filters = []
-    if pattern_type:
-        filters.append(f"type={pattern_type}")
-    if group:
-        filters.append(f"group={group}")
-    if search:
-        filters.append(f"search={search}")
-    if disabled:
-        filters.append("disabled only")
-    elif enabled:
-        filters.append("enabled only")
-    if filters:
-        filter_desc = f" — [dim]Filtered: {', '.join(filters)}[/dim]"
 
     sections: list[tuple[str, str, list[dict[str, Any]]]] = [
         ("BLOCK", "patterns", config.get("patterns", [])),
@@ -634,6 +618,8 @@ def _toggle_interactive(
     from .display import _console
     from rich.text import Text
 
+    _cprint = _console.print if _console is not None else lambda *a, **kw: None
+
     # In enable mode, only show disabled patterns (ones that need enabling).
     # In disable mode, only show enabled patterns (ones that need disabling).
     show_disabled = enable
@@ -655,9 +641,9 @@ def _toggle_interactive(
 
     # Build a visible-entries list (1-based displayed numbering)
     visible_entries: list[dict[str, Any]] = []
-    _console.print()
-    _console.print(f"Select pattern to {action}:")
-    _console.print()
+    _cprint()
+    _cprint(f"Select pattern to {action}:")
+    _cprint()
 
     for section_key in ("patterns", "allow_patterns", "deny_patterns"):
         entries = [e for e in all_entries if e["_section"] == section_key]
@@ -670,7 +656,7 @@ def _toggle_interactive(
             continue
         colour = section_styles[section_key]
         label = section_labels[section_key]
-        _console.print(f"[{colour} bold]\u25c6 {label}[/{colour} bold] patterns")
+        _cprint(f"[{colour} bold]\u25c6 {label}[/{colour} bold] patterns")
         for i, e in enumerate(entries):
             idx = get_index(e, all_entries)
             is_enabled = e.get("enabled", True)
@@ -684,9 +670,9 @@ def _toggle_interactive(
             grp = e.get("group", "")
             if grp:
                 line.append(f"  group: {grp}", style="dim")
-            _console.print(line)
+            _cprint(line)
             visible_entries.append(e)
-        _console.print()
+        _cprint()
 
     if not visible_entries:
         return (
@@ -1364,10 +1350,20 @@ def _add_noninteractive(
         index = len(config.get(section_key, []))
 
     file_info = f"  [dim]File: {target_file}[/dim]\n" if target_file else ""
+
+    shadow_warnings = ""
+    if pattern_type == "allow":
+        from .patterns import compile_all
+        compile_all(config)
+        sw = _check_allow_shadowing_for_cli(config)
+        if sw:
+            shadow_warnings = "\n" + "\n".join(sw) + "\n"
+
     return (
         f"[success]✓[/success] Added {pattern_type} pattern: [bold]\"{description}\"[/bold]\n"
         f"{file_info}"
         f"  Index: [{index}]\n"
+        f"{shadow_warnings}"
         f"{_config_update_reminder()}",
         0,
     )
@@ -1423,9 +1419,11 @@ def _remove_interactive(
     from .display import _console
     from rich.text import Text
 
-    _console.print()
-    _console.print("Select pattern to remove:")
-    _console.print()
+    _cprint = _console.print if _console is not None else lambda *a, **kw: None
+
+    _cprint()
+    _cprint("Select pattern to remove:")
+    _cprint()
 
     section_styles = {
         "patterns": "yellow",
@@ -1444,7 +1442,7 @@ def _remove_interactive(
             continue
         colour = section_styles[section_key]
         label = section_labels[section_key]
-        _console.print(f"[{colour} bold]\u25c6 {label}[/{colour} bold] patterns")
+        _cprint(f"[{colour} bold]\u25c6 {label}[/{colour} bold] patterns")
         for e in entries:
             idx = get_index(e, all_entries)
             is_enabled = e.get("enabled", True)
@@ -1461,8 +1459,8 @@ def _remove_interactive(
             grp = e.get("group", "")
             if grp:
                 line.append(f"  group: {grp}", style="dim")
-            _console.print(line)
-        _console.print()
+            _cprint(line)
+        _cprint()
 
     try:
         choice = input("Enter index to remove (or 0 to cancel): ").strip()
@@ -1539,7 +1537,7 @@ def _remove_by_target(
     unless --force is passed.
     """
     from .config import save_config, remove_entry_from_file
-    from .display import _console
+    from .display import render_and_print
 
     try:
         from rich.markup import escape as _rich_escape
@@ -1605,8 +1603,8 @@ def _remove_by_target(
     # Show matched pattern and request confirmation (unless --force)
     if not force:
         desc_safe = _rich_escape(entry["description"])
-        _console.print()
-        _console.print(
+        render_and_print("")
+        render_and_print(
             f"[bold]Matched pattern:[/bold] [{eidx}] "
             f"[bold]{type_label}:[/bold] {desc_safe}"
         )
@@ -1870,6 +1868,90 @@ def _config_update_reminder() -> str:
         "\n[dim]Remember to restart the Hermes gateway and any active CLI/TUI sessions\n"
         "for changes to take effect.[/dim]"
     )
+
+
+def _extract_tokens(pattern: str) -> list[str]:
+    cleaned = re.sub(r"\\b", " ", pattern)
+    cleaned = re.sub(r"[\\*+?.^$()\[\]{}|]", " ", cleaned)
+    return [t for t in cleaned.split() if len(t) >= 3]
+
+
+def _cli_patterns_overlap(re1: re.Pattern, re2: re.Pattern) -> bool:
+    p1, p2 = re1.pattern, re2.pattern
+    if p1 in (".*", ".+", "^.*$") or p2 in (".*", ".+", "^.*$"):
+        return True
+    tokens1 = set(_extract_tokens(p1))
+    tokens2 = set(_extract_tokens(p2))
+    return bool(tokens1 & tokens2)
+
+
+def _check_allow_shadowing_for_cli(config: dict[str, Any]) -> list[str]:
+    """Check if allow patterns shadow built-in patterns, return warning messages.
+
+    CLI-safe version of __init__._check_allow_shadowing() that uses the
+    static _BUILTIN_PATTERNS snapshot instead of importing tools.approval
+    (which is only available in the Hermes runtime).  Returns a list of
+    warning strings (empty if no shadowing detected).
+    """
+    from .patterns import compile_allow_patterns
+
+    allow_compiled = compile_allow_patterns(config.get("allow_patterns", []))
+    if not allow_compiled:
+        return []
+
+    block_raw = config.get("patterns", [])
+    block_enabled = [p for p in block_raw if p.get("enabled", True)]
+    block_compiled = []
+    for entry in block_enabled:
+        try:
+            block_compiled.append(re.compile(entry["pattern"], re.IGNORECASE | re.DOTALL))
+        except re.error:
+            pass
+
+    warnings: list[str] = []
+
+    for allow_re, allow_desc in allow_compiled:
+        shadowed: list[str] = []
+        for pat_str, builtin_desc in _BUILTIN_PATTERNS:
+            try:
+                builtin_re = re.compile(pat_str, re.IGNORECASE | re.DOTALL)
+                if _cli_patterns_overlap(allow_re, builtin_re):
+                    shadowed.append(builtin_desc)
+            except re.error:
+                pass
+
+        if not shadowed:
+            continue
+
+        covered_by_block = False
+        for block_re in block_compiled:
+            for pat_str, _ in _BUILTIN_PATTERNS:
+                try:
+                    builtin_re = re.compile(pat_str, re.IGNORECASE | re.DOTALL)
+                    if _cli_patterns_overlap(block_re, builtin_re):
+                        covered_by_block = True
+                        break
+                except re.error:
+                    pass
+            if covered_by_block:
+                break
+
+        if not covered_by_block:
+            try:
+                from rich.markup import escape as _rich_escape
+            except ImportError:
+                _rich_escape = lambda s: s
+            warnings.append(
+                f"[warning]\u26a0[/warning] Allow shadowing: pattern "
+                f"'{_rich_escape(allow_re.pattern)}' "
+                f"({_rich_escape(allow_desc)}) may bypass built-in "
+                f"dangerous patterns: "
+                f"{', '.join(_rich_escape(s) for s in shadowed[:3])}"
+                f"{'...' if len(shadowed) > 3 else ''}. "
+                f"Consider adding a corresponding custom block pattern."
+            )
+
+    return warnings
 
 
 # ---------------------------------------------------------------------------

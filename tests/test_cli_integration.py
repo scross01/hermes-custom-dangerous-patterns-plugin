@@ -191,7 +191,7 @@ class TestFileMode:
         """Removing a pattern by index deletes it from the file."""
         _write_yaml(self.yaml_path(hermes_home), _config(SIMPLE_BLOCK_PATTERNS))
 
-        output, exit_code = cli_module.cmd_remove(target="2")
+        output, exit_code = cli_module.cmd_remove(target="2", force=True)
         assert exit_code == 0
         assert "AWS CLI" in output
 
@@ -203,7 +203,7 @@ class TestFileMode:
         """Removing a pattern by description substring works."""
         _write_yaml(self.yaml_path(hermes_home), _config(SIMPLE_BLOCK_PATTERNS))
 
-        output, exit_code = cli_module.cmd_remove(target="Vultr")
+        output, exit_code = cli_module.cmd_remove(target="Vultr", force=True)
         assert exit_code == 0
 
         data = _read_yaml(self.yaml_path(hermes_home))
@@ -214,11 +214,26 @@ class TestFileMode:
         """Removing an allow pattern works."""
         _write_yaml(self.yaml_path(hermes_home), _config(allow=SIMPLE_ALLOW_PATTERNS))
 
-        output, exit_code = cli_module.cmd_remove(target="1")
+        output, exit_code = cli_module.cmd_remove(target="1", force=True)
         assert exit_code == 0
 
         data = _read_yaml(self.yaml_path(hermes_home))
         assert len(data.get("allow_patterns", [])) == 0
+
+    def test_remove_without_force_cancels(self, cli_module, hermes_home, monkeypatch, capsys):
+        """Without --force, confirmation prompt shown and pattern not removed on cancel."""
+        _write_yaml(self.yaml_path(hermes_home), _config(SIMPLE_BLOCK_PATTERNS))
+
+        monkeypatch.setattr("builtins.input", lambda _: "n")
+        output, exit_code = cli_module.cmd_remove(target="2")
+
+        assert exit_code == 0
+        assert "Cancelled" in output
+        captured = capsys.readouterr()
+        assert "Matched pattern" in captured.out
+
+        data = _read_yaml(self.yaml_path(hermes_home))
+        assert len(data.get("patterns", [])) == 2
 
     # --- enable / disable ---
 
@@ -370,7 +385,7 @@ class TestDirMode:
         """Removing a pattern in dir mode writes it as disabled, not deleted."""
         self.setup_dir(hermes_home, _config(SIMPLE_BLOCK_PATTERNS))
 
-        output, exit_code = cli_module.cmd_remove(target="1")
+        output, exit_code = cli_module.cmd_remove(target="1", force=True)
         assert exit_code == 0
 
         # 99-custom.yaml has the removed pattern as disabled
@@ -445,7 +460,7 @@ class TestDirMode:
         self.setup_dir(hermes_home, _config(SIMPLE_BLOCK_PATTERNS))
 
         # Remove Vultr -> writes disabled entry to 99-custom
-        cli_module.cmd_remove(target="1")
+        cli_module.cmd_remove(target="1", force=True)
         # Add new pattern -> writes new entry alongside existing disabled
         cli_module.cmd_add(
             pattern_type="block", pattern=r"\bgcloud\b", description="GCP CLI",
@@ -566,7 +581,7 @@ class TestCombinedMode:
             {"00-test.yaml": _config([SIMPLE_BLOCK_PATTERNS[1]])},  # AWS in .d/
         )
 
-        output, exit_code = cli_module.cmd_remove(target="1")
+        output, exit_code = cli_module.cmd_remove(target="1", force=True)
         assert exit_code == 0
 
         cli = _read_yaml(self.cli_file(hermes_home))
