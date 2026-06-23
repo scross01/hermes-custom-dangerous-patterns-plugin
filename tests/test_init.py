@@ -285,6 +285,105 @@ def test_deny_handler_fallback_composes_with_allow(monkeypatch):
     assert result == (False, None, None)
 
 
+def test_deny_handler_command_via_kwarg(monkeypatch):
+    """The command kwarg path still triggers deny when no positional arg."""
+    approval = _install_tools_approval(monkeypatch)
+    mock_original = MagicMock()
+    approval.check_all_command_guards = mock_original
+
+    from __init__ import _patch_deny_handler
+
+    def deny_checker(cmd):
+        return "Ruby system exec" if "ruby" in cmd else None
+
+    _patch_deny_handler(deny_checker)
+    result = approval.check_all_command_guards(command="ruby -e 'system(\"rm\")'")
+    assert result["approved"] is False
+    assert "Ruby system exec" in result["message"]
+    mock_original.assert_not_called()
+
+
+def test_deny_handler_warns_and_falls_through_on_unknown_shape(
+    monkeypatch, caplog
+):
+    """An unrecognized call shape warns and falls through; deny is not guessed.
+
+    Guards the fragility noted for the monkey-patched check_all_command_guards:
+    if Hermes changes the signature, this defense layer must degrade visibly
+    (warn + delegate) rather than silently skip deny or crash. The pre_tool_call
+    hook remains the primary deny path.
+    """
+    import logging
+
+    approval = _install_tools_approval(monkeypatch)
+    mock_original = MagicMock(return_value={"approved": True, "message": "ok"})
+    approval.check_all_command_guards = mock_original
+
+    from __init__ import _patch_deny_handler
+
+    deny_calls = []
+
+    def deny_checker(cmd):
+        deny_calls.append(cmd)
+        return None
+
+    _patch_deny_handler(deny_checker)
+
+    with caplog.at_level(logging.WARNING, logger="__init__"):
+        result = approval.check_all_command_guards()  # no args, no command kwarg
+
+    assert result == {"approved": True, "message": "ok"}
+    mock_original.assert_called_once()
+    # deny_checker must not be invoked with a guessed/empty command
+    assert deny_calls == []
+    assert any("could not identify command" in r.message for r in caplog.records)
+
+
+def test_deny_handler_non_string_positional_does_not_crash(monkeypatch, caplog):
+    """A non-string first positional arg falls through instead of crashing.
+
+    Previously args[0] was passed straight into the matcher, which would raise
+    a TypeError inside check_all_command_guards if Hermes ever passed a
+    non-string (e.g. a context object) first. Now it degrades safely.
+    """
+    import logging
+
+    approval = _install_tools_approval(monkeypatch)
+    mock_original = MagicMock(return_value={"approved": True, "message": "ok"})
+    approval.check_all_command_guards = mock_original
+
+    from __init__ import _patch_deny_handler
+
+    def deny_checker(cmd):
+        raise AssertionError("deny_checker must not run for non-string command")
+
+    _patch_deny_handler(deny_checker)
+
+    with caplog.at_level(logging.WARNING, logger="__init__"):
+        # Pass a non-string first positional (simulate a signature change).
+        result = approval.check_all_command_guards({"session": "x"}, "ruby cmd")
+
+    assert result["approved"] is True
+    mock_original.assert_called_once()
+    assert any("could not identify command" in r.message for r in caplog.records)
+
+
+def test_extract_guard_command_shapes():
+    """Unit-test the command extractor across recognized/unknown shapes."""
+    from __init__ import _extract_guard_command
+
+    assert _extract_guard_command(("rm -rf /",), {}) == ("rm -rf /", True)
+    assert _extract_guard_command((), {"command": "echo"}) == ("echo", True)
+    # positional string wins over a command kwarg
+    assert _extract_guard_command(("a",), {"command": "b"}) == ("a", True)
+    # non-string positional is not treated as the command
+    assert _extract_guard_command((123,), {}) == ("", False)
+    assert _extract_guard_command(({"x": 1},), {}) == ("", False)
+    # nothing recognizable
+    assert _extract_guard_command((), {}) == ("", False)
+    assert _extract_guard_command((), {"cmd": "echo"}) == ("", False)
+
+
 def test_register_with_deny_patterns(
     monkeypatch, tmp_path, init_register
 ):

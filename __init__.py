@@ -271,6 +271,29 @@ def _patch_detect_function(allow_checker) -> None:
     approval.detect_dangerous_command = _patched
 
 
+def _extract_guard_command(args: tuple, kwargs: dict) -> tuple[str, bool]:
+    """Best-effort extraction of the command string from a guard call.
+
+    ``check_all_command_guards`` is monkey-patched, so we must infer the
+    command from however Hermes calls it. We only accept shapes we can
+    identify confidently -- a leading positional ``str`` argument or a
+    ``command=`` keyword argument -- and return ``found=False`` for anything
+    else instead of guessing. This keeps a signature change *detectable*
+    (the caller warns and falls through to the original) rather than silently
+    skipping deny patterns or passing a non-string into the matcher (which
+    would raise and break the guard outright).
+
+    The pre_tool_call hook remains the primary deny path; this wrapper is
+    defense-in-depth.
+    """
+    if args and isinstance(args[0], str):
+        return args[0], True
+    cmd = kwargs.get("command")
+    if isinstance(cmd, str):
+        return cmd, True
+    return "", False
+
+
 def _patch_deny_handler(deny_checker, allow_checker=None) -> None:
     """Wrap check_all_command_guards to block deny-pattern commands.
 
@@ -303,8 +326,22 @@ def _patch_deny_handler(deny_checker, allow_checker=None) -> None:
         return
 
     def _patched(*args: Any, **kwargs: Any) -> dict[str, Any]:
-        # Extract command from positional or keyword args.
-        command = args[0] if args else kwargs.get("command", "")
+        # Extract the command from however Hermes called the guard. If the
+        # call shape is unrecognizable, warn and fall through rather than
+        # guess -- a Hermes signature change should be detectable, not a
+        # silent deny bypass (and never a crash from a non-string arg).
+        command, found = _extract_guard_command(args, kwargs)
+        if not found:
+            first_type = type(args[0]).__name__ if args else "<none>"
+            logger.warning(
+                "custom-dangerous-patterns: could not identify command "
+                "argument in check_all_command_guards call (first positional "
+                "type=%s, kwargs=%r); skipping deny patterns on this path. "
+                "Hermes signature may have changed.",
+                first_type,
+                list(kwargs.keys()),
+            )
+            return original(*args, **kwargs)
 
         # Check deny patterns before the original guard runs.
         deny_match = deny_checker(command)
