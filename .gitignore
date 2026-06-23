@@ -17,3 +17,4 @@ uv.lock
 CLAUDE.md
 wiki/
 plans/
+.coverage/
