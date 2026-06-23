@@ -1,7 +1,7 @@
 # Change Log
 
 
-## Unreleased
+## 0.3.4
 
 - `add` now warns when a new allow pattern could shadow Hermes built-in dangerous patterns without a covering custom block pattern.
 - The allow-shadowing warning is no longer suppressed by an unrelated block pattern covering a different built-in.
