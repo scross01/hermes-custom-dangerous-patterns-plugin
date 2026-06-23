@@ -789,3 +789,143 @@ def test_allow_shadowing_suppressed_when_block_covers_same_builtins(cli_module):
     }
     warnings = cli_module._check_allow_shadowing_for_cli(config)
     assert len(warnings) == 0
+
+
+# ---------------------------------------------------------------------------
+# cmd_info — integrity status (single-file AND directory modes)
+# ---------------------------------------------------------------------------
+
+
+def _write_hash_file(config_path, config_hash):
+    """Write a .custom-patterns-hash file alongside the config."""
+    import json
+
+    hash_path = config_path.parent / ".custom-patterns-hash"
+    hash_path.write_text(
+        json.dumps({
+            "config_hash": config_hash,
+            "pattern_counts": {"patterns": 0, "allow_patterns": 0, "deny_patterns": 0},
+            "protected": {},
+        }),
+        encoding="utf-8",
+    )
+    return hash_path
+
+
+def _config_raw_hash(config_path):
+    """Compute the config hash the same way cmd_info now does."""
+    import hashlib
+
+    cfg_mod = sys.modules["hermes_plugins.config"]
+    raw = cfg_mod._load_raw_config_text(config_path)
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def _patch_config_path(monkeypatch, config_path):
+    """Redirect config path resolution to config_path."""
+    monkeypatch.setattr(
+        sys.modules["hermes_plugins.config"],
+        "_resolve_config_path",
+        lambda: config_path,
+    )
+
+
+def test_cmd_info_integrity_matches_single_file(monkeypatch, cli_module, tmp_path):
+    """Single-file config with a matching hash reports 'hash matches'."""
+    config_path = tmp_path / "custom-dangerous-patterns.yaml"
+    config_path.write_text("patterns: []\nallow_patterns: []\ndeny_patterns: []\n",
+                           encoding="utf-8")
+    _write_hash_file(config_path, _config_raw_hash(config_path))
+    _patch_config_path(monkeypatch, config_path)
+
+    output, exit_code = cli_module.cmd_info()
+    assert exit_code == 0
+    assert "hash matches previous session" in output
+    assert "Last changed" in output
+
+
+def test_cmd_info_integrity_changed_single_file(monkeypatch, cli_module, tmp_path):
+    """Single-file config with a stale hash reports 'hash changed'."""
+    config_path = tmp_path / "custom-dangerous-patterns.yaml"
+    config_path.write_text("patterns: []\nallow_patterns: []\ndeny_patterns: []\n",
+                           encoding="utf-8")
+    _write_hash_file(config_path, "0" * 64)  # wrong hash
+    _patch_config_path(monkeypatch, config_path)
+
+    output, _ = cli_module.cmd_info()
+    assert "hash changed since last session" in output
+
+
+def test_cmd_info_integrity_matches_directory_mode(monkeypatch, cli_module, tmp_path):
+    """Directory config with a matching hash reports 'hash matches'.
+
+    Regression: the integrity block was previously gated on
+    ``config_path.is_file()``, so directory configs (the recommended
+    default) silently skipped the hash comparison and showed no status.
+    """
+    config_dir = tmp_path / "custom-dangerous-patterns"
+    config_dir.mkdir()
+    (config_dir / "10-cloud.yaml").write_text(
+        "patterns:\n  - pattern: '\\bvultr\\b'\n    description: 'Vultr'\n",
+        encoding="utf-8",
+    )
+    (config_dir / "20-db.yaml").write_text(
+        "patterns:\n  - pattern: '\\bDROP\\b'\n    description: 'DROP'\n",
+        encoding="utf-8",
+    )
+    _write_hash_file(config_dir, _config_raw_hash(config_dir))
+    _patch_config_path(monkeypatch, config_dir)
+
+    output, exit_code = cli_module.cmd_info()
+    assert exit_code == 0
+    assert "hash matches previous session" in output
+
+
+def test_cmd_info_integrity_changed_directory_mode(monkeypatch, cli_module, tmp_path):
+    """Directory config with a stale hash reports 'hash changed'.
+
+    Second half of the directory-mode regression: previously the stale hash
+    was never compared, so a tampered directory config showed no warning.
+    """
+    config_dir = tmp_path / "custom-dangerous-patterns"
+    config_dir.mkdir()
+    (config_dir / "10-cloud.yaml").write_text(
+        "patterns:\n  - pattern: '\\bvultr\\b'\n    description: 'Vultr'\n",
+        encoding="utf-8",
+    )
+    _write_hash_file(config_dir, "0" * 64)  # wrong hash
+    _patch_config_path(monkeypatch, config_dir)
+
+    output, _ = cli_module.cmd_info()
+    assert "hash changed since last session" in output
+
+
+# _config_content_files (mtime display helper)
+
+
+def test_config_content_files_single_file(cli_module, tmp_path):
+    f = tmp_path / "custom-dangerous-patterns.yaml"
+    f.write_text("", encoding="utf-8")
+    assert cli_module._config_content_files(f) == [f]
+
+
+def test_config_content_files_directory_includes_yaml(cli_module, tmp_path):
+    d = tmp_path / "custom-dangerous-patterns"
+    d.mkdir()
+    a = d / "10.yaml"
+    b = d / "20.yaml"
+    a.write_text("", encoding="utf-8")
+    b.write_text("", encoding="utf-8")
+    assert cli_module._config_content_files(d) == [a, b]
+
+
+def test_config_content_files_directory_with_sibling(cli_module, tmp_path):
+    """Combined mode: the sibling .yaml is appended after dir files."""
+    d = tmp_path / "custom-dangerous-patterns"
+    d.mkdir()
+    a = d / "10.yaml"
+    a.write_text("", encoding="utf-8")
+    sibling = tmp_path / "custom-dangerous-patterns.yaml"
+    sibling.write_text("", encoding="utf-8")
+    files = cli_module._config_content_files(d)
+    assert a in files and sibling in files

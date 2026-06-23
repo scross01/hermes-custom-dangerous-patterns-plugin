@@ -868,10 +868,26 @@ def cmd_validate(
     return ("\n".join(lines) + "\n", 0)
 
 
+def _config_content_files(config_path: Path) -> list[Path]:
+    """Return the files whose content makes up the config (for mtime display).
+
+    Mirrors the set read by ``config._load_raw_config_text``: a single file,
+    or a directory's ``*.yaml`` files plus the combined-mode sibling ``.yaml``.
+    """
+    if config_path.is_file() or not config_path.is_dir():
+        return [config_path]
+    files = sorted(config_path.glob("*.yaml"))
+    sibling = config_path.parent / (config_path.stem + ".yaml")
+    if sibling.is_file():
+        files.append(sibling)
+    return files or [config_path]
+
+
 def cmd_info() -> tuple[str, int]:
     """Show plugin configuration dashboard."""
     from .config import (
         _load_hash_data,
+        _load_raw_config_text,
         _resolve_hash_path,
         get_config_path_display,
         load_config,
@@ -896,21 +912,32 @@ def cmd_info() -> tuple[str, int]:
     path_display = get_config_path_display()
     lines.append(path_info("Config", path_display))
 
-    # Integrity check
+    # Integrity check. Works for single-file AND directory configs: the hash
+    # is computed over the same raw text the runtime hashes
+    # (config._load_raw_config_text), so the displayed status matches what was
+    # actually checked at startup. Previously this was gated on
+    # config_path.is_file(), which silently skipped the hash comparison for
+    # directory configs -- the recommended default.
     hash_path = _resolve_hash_path(config_path)
     if hash_path.is_file():
         try:
             previous = _load_hash_data(hash_path)
             prev_hash = previous.get("config_hash")
-            if prev_hash and config_path.is_file():
-                current_hash = hashlib.sha256(
-                    config_path.read_text(encoding="utf-8").encode("utf-8")
-                ).hexdigest()
-                if current_hash == prev_hash:
-                    lines.append(check("Integrity: hash matches previous session"))
-                else:
-                    lines.append(warn_mark("Integrity: hash changed since last session"))
-            mtime = os.path.getmtime(str(config_path))
+            if prev_hash:
+                raw_text = _load_raw_config_text(config_path)
+                if raw_text:
+                    current_hash = hashlib.sha256(
+                        raw_text.encode("utf-8")
+                    ).hexdigest()
+                    if current_hash == prev_hash:
+                        lines.append(check("Integrity: hash matches previous session"))
+                    else:
+                        lines.append(warn_mark("Integrity: hash changed since last session"))
+            # Last-changed time: newest constituent file for a directory
+            # (content edits), the file itself otherwise. Combined-mode
+            # sibling included so edits there are reflected too.
+            content_files = _config_content_files(config_path)
+            mtime = max(os.path.getmtime(str(p)) for p in content_files)
             lines.append(
                 muted(f"  Last changed: "
                 f"{datetime.fromtimestamp(mtime).strftime('%Y-%m-%d %H:%M:%S')}")
