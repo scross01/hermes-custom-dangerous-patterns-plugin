@@ -1,6 +1,15 @@
 # Change Log
 
 
+## Unreleased
+
+- `add` now warns when a new allow pattern could shadow Hermes built-in dangerous patterns without a covering custom block pattern.
+- The allow-shadowing warning is no longer suppressed by an unrelated block pattern covering a different built-in.
+- `info` now reports config integrity (hash match/changed) for directory configs — previously the status was silently omitted in directory mode.
+- New bundled example patterns for package managers (`brew`, `npm`, `pip`, `cargo`, `uv`), included by `init --with-examples`.
+- Deny-pattern guard now logs a warning and delegates to the original guard instead of crashing or silently skipping if the Hermes guard call signature ever changes.
+
+
 ## 0.3.3
 
 - `init --with-examples` now copies all new bundled example files.
