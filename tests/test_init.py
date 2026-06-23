@@ -307,6 +307,9 @@ def test_register_with_deny_patterns(
 
 # ---------------------------------------------------------------------------
 # _check_allow_shadowing / _patterns_overlap / _extract_tokens
+#
+# The overlap helpers now live in patterns.py (shared with cli.py). They are
+# tested here against their canonical location.
 # ---------------------------------------------------------------------------
 
 
@@ -314,7 +317,7 @@ def test_patterns_overlap_broad():
     """Broad patterns like '.*' shadow everything."""
     import re
 
-    from __init__ import _patterns_overlap
+    from patterns import _patterns_overlap
 
     r1 = re.compile(".*")
     r2 = re.compile(r"\brm\b")
@@ -325,7 +328,7 @@ def test_patterns_overlap_token_match():
     """Patterns with shared tokens overlap."""
     import re
 
-    from __init__ import _patterns_overlap
+    from patterns import _patterns_overlap
 
     r1 = re.compile(r"\baws\b.*")
     r2 = re.compile(r"\baws\s+ec2\b")
@@ -336,7 +339,7 @@ def test_patterns_overlap_no_match():
     """Unrelated patterns don't overlap."""
     import re
 
-    from __init__ import _patterns_overlap
+    from patterns import _patterns_overlap
 
     r1 = re.compile(r"\bvultr\b")
     r2 = re.compile(r"\baws\b")
@@ -345,7 +348,7 @@ def test_patterns_overlap_no_match():
 
 def test_extract_tokens():
     """Extracts word tokens >= 3 chars from regex."""
-    from __init__ import _extract_tokens
+    from patterns import _extract_tokens
 
     tokens = _extract_tokens(r"\baws\s+(ec2|s3|rds)\b")
     assert "aws" in tokens

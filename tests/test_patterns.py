@@ -624,3 +624,68 @@ def test_normalize_fallback_on_missing_strip_ansi(monkeypatch):
 
     result = _normalize("\x1b[31mhello\x1b[0m world")
     assert result == "hello world"
+
+
+# ---------------------------------------------------------------------------
+# find_uncovered_allow_shadowing (shared by runtime __init__ and CLI)
+# ---------------------------------------------------------------------------
+
+
+def _c(pattern: str):
+    return re.compile(pattern, re.IGNORECASE | re.DOTALL)
+
+
+def test_find_uncovered_allow_shadowing_reports_broad_allow():
+    """A broad allow with no block is reported with the built-ins it shadows."""
+    from patterns import find_uncovered_allow_shadowing
+
+    allow = [(_c(r"\bdocker\b"), "Allow docker")]
+    builtins = [
+        (_c(r"\bdocker\s+rm\s+-f\b"), "docker rm -f"),
+        (_c(r"\brm\s+-rf\b"), "rm with -rf flag"),
+    ]
+    result = find_uncovered_allow_shadowing(allow, [], builtins)
+    assert len(result) == 1
+    allow_re, allow_desc, shadowed = result[0]
+    assert allow_desc == "Allow docker"
+    assert "docker rm -f" in shadowed
+    assert "rm with -rf flag" not in shadowed  # docker allow doesn't shadow rm
+
+
+def test_find_uncovered_allow_shadowing_suppressed_by_covering_block():
+    """A block that overlaps ALL shadowed built-ins suppresses the finding."""
+    from patterns import find_uncovered_allow_shadowing
+
+    allow = [(_c(r"\bdocker\b"), "Allow docker")]
+    block = [_c(r"\bdocker\b")]  # overlaps the same docker built-in
+    builtins = [(_c(r"\bdocker\s+rm\s+-f\b"), "docker rm -f")]
+    assert find_uncovered_allow_shadowing(allow, block, builtins) == []
+
+
+def test_find_uncovered_allow_shadowing_not_suppressed_by_unrelated_block():
+    """A block overlapping a DIFFERENT built-in must not suppress the finding.
+
+    This is the core regression for the coverage-scoping bug: the allow
+    shadows the docker built-in; the rm block does not cover it.
+    """
+    from patterns import find_uncovered_allow_shadowing
+
+    allow = [(_c(r"\bdocker\b"), "Allow docker")]
+    block = [_c(r"\brm\s+-rf\b")]  # covers rm, NOT docker
+    builtins = [
+        (_c(r"\bdocker\s+rm\s+-f\b"), "docker rm -f"),
+        (_c(r"\brm\s+-rf\b"), "rm with -rf flag"),
+    ]
+    result = find_uncovered_allow_shadowing(allow, block, builtins)
+    assert len(result) == 1
+    assert result[0][1] == "Allow docker"
+    assert "docker rm -f" in result[0][2]
+
+
+def test_find_uncovered_allow_shadowing_skips_non_shadowing_allows():
+    """An allow that overlaps no built-in produces no finding."""
+    from patterns import find_uncovered_allow_shadowing
+
+    allow = [(_c(r"\bmyapp\s+read\b"), "MyApp read")]
+    builtins = [(_c(r"\brm\s+-rf\b"), "rm with -rf flag")]
+    assert find_uncovered_allow_shadowing(allow, [], builtins) == []

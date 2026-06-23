@@ -739,3 +739,53 @@ def test_add_allow_pattern_no_shadowing(cli_module):
     }
     warnings = cli_module._check_allow_shadowing_for_cli(config)
     assert len(warnings) == 0
+
+
+def test_allow_shadowing_not_suppressed_by_unrelated_block(cli_module):
+    """A block covering a *different* built-in must not suppress the warning.
+
+    Regression: the CLI coverage check previously flipped ``covered_by_block``
+    True if any block overlapped *any* built-in, instead of the specific
+    built-ins the allow shadows. That silenced real shadowing warnings — the
+    unsafe direction for a safety plugin. Here an allow for ``\bdocker\b``
+    shadows docker built-ins, while the block only covers the ``rm -rf`` /
+    ``dd`` built-ins. The shadowing must still be reported.
+    """
+    config = {
+        "patterns": [
+            {
+                "pattern": r"\brm\s+(-[a-zA-Z]*r[a-zA-Z]*f)\b",
+                "description": "rm -rf block",
+                "enabled": True,
+            },
+        ],
+        "allow_patterns": [
+            {"pattern": r"\bdocker\b", "description": "Allow docker", "enabled": True},
+        ],
+        "deny_patterns": [],
+    }
+    warnings = cli_module._check_allow_shadowing_for_cli(config)
+    assert len(warnings) > 0, (
+        "shadowing warning was suppressed by an unrelated block pattern"
+    )
+    assert any("docker" in w.lower() for w in warnings)
+
+
+def test_allow_shadowing_suppressed_when_block_covers_same_builtins(cli_module):
+    """A block that covers the same built-ins DOES suppress the warning.
+
+    Positive control for the coverage-scoping fix: an allow for
+    ``\bdocker\b`` plus a block for ``\bdocker\b`` (which overlaps the same
+    docker built-ins) is treated as intentionally scoped — no warning.
+    """
+    config = {
+        "patterns": [
+            {"pattern": r"\bdocker\b", "description": "docker block", "enabled": True},
+        ],
+        "allow_patterns": [
+            {"pattern": r"\bdocker\b", "description": "Allow docker", "enabled": True},
+        ],
+        "deny_patterns": [],
+    }
+    warnings = cli_module._check_allow_shadowing_for_cli(config)
+    assert len(warnings) == 0

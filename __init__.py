@@ -21,7 +21,6 @@ They are checked AFTER allow patterns but BEFORE block patterns.
 from __future__ import annotations
 
 import logging
-import re
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -452,78 +451,40 @@ def _check_allow_shadowing(config: dict, is_allow_pattern) -> None:
     """Warn when allow patterns could bypass built-in dangerous patterns.
 
     For each enabled allow pattern, checks if it matches any built-in
-    DANGEROUS_PATTERNS entry without a corresponding custom block pattern.
-    Logs a WARNING explaining the built-in bypass risk.
+    DANGEROUS_PATTERNS entry without a corresponding custom block pattern
+    covering the same built-ins. Logs a WARNING explaining the built-in
+    bypass risk. Coverage scoping and overlap heuristics live in
+    :mod:`patterns` (:func:`find_uncovered_allow_shadowing`) so the runtime
+    and CLI cannot diverge.
     """
     import re
 
     from tools.approval import DANGEROUS_PATTERNS_COMPILED
 
-    from .patterns import compile_allow_patterns
+    from .patterns import compile_allow_patterns, find_uncovered_allow_shadowing
 
     allow_compiled = compile_allow_patterns(config.get("allow_patterns", []))
     block_raw = config.get("patterns", [])
-    block_enabled = [p for p in block_raw if p.get("enabled", True)]
+    block_compiled: list[re.Pattern] = []
+    for entry in block_raw:
+        if not entry.get("enabled", True):
+            continue
+        try:
+            block_compiled.append(
+                re.compile(entry["pattern"], re.IGNORECASE | re.DOTALL)
+            )
+        except re.error:
+            pass
 
-    for allow_re, allow_desc in allow_compiled:
-        # Check if this allow pattern matches any built-in dangerous pattern
-        shadowed = []
-        for builtin_re, builtin_desc in DANGEROUS_PATTERNS_COMPILED:
-            if _patterns_overlap(allow_re, builtin_re):
-                shadowed.append(builtin_desc)
-
-        if shadowed:
-            # Check if a custom block pattern would also match these commands
-            covered = False
-            for entry in block_enabled:
-                try:
-                    block_re = re.compile(
-                        entry["pattern"], re.IGNORECASE | re.DOTALL
-                    )
-                    if all(
-                        _patterns_overlap(block_re, builtin_re)
-                        for builtin_re, _ in DANGEROUS_PATTERNS_COMPILED
-                        if _patterns_overlap(allow_re, builtin_re)
-                    ):
-                        covered = True
-                        break
-                except re.error:
-                    pass
-
-            if not covered:
-                logger.warning(
-                    "custom-dangerous-patterns: ALLOW SHADOWING -- allow "
-                    "pattern '%s' (%s) may bypass built-in dangerous "
-                    "patterns: %s. Consider adding a corresponding custom "
-                    "block pattern to scope the exemption.",
-                    allow_re.pattern,
-                    allow_desc,
-                    ", ".join(shadowed[:3])
-                    + ("..." if len(shadowed) > 3 else ""),
-                )
-
-
-def _patterns_overlap(re1: re.Pattern, re2: re.Pattern) -> bool:
-    """Check if two compiled regex patterns can match overlapping strings.
-
-    A simple heuristic: if the patterns share word-like tokens of length
-    >= 3, they likely overlap. Broad patterns like '.*' shadow everything.
-    Not perfect, but catches the most dangerous cases.
-    """
-    p1, p2 = re1.pattern, re2.pattern
-    # Broad patterns shadow everything
-    if p1 in (".*", ".+", "^.*$"):
-        return True
-    # Check token overlap
-    tokens1 = set(_extract_tokens(p1))
-    tokens2 = set(_extract_tokens(p2))
-    return bool(tokens1 & tokens2)
-
-
-def _extract_tokens(pattern: str) -> list[str]:
-    """Extract word-like tokens from a regex pattern for overlap check."""
-    # Remove word-boundary markers (e.g., \baws -> aws)
-    cleaned = re.sub(r"\\b", " ", pattern)
-    # Remove other regex metacharacters
-    cleaned = re.sub(r"[\\*+?.^$()\[\]{}|]", " ", cleaned)
-    return [t for t in cleaned.split() if len(t) >= 3]
+    for allow_re, allow_desc, shadowed in find_uncovered_allow_shadowing(
+        allow_compiled, block_compiled, DANGEROUS_PATTERNS_COMPILED
+    ):
+        logger.warning(
+            "custom-dangerous-patterns: ALLOW SHADOWING -- allow "
+            "pattern '%s' (%s) may bypass built-in dangerous "
+            "patterns: %s. Consider adding a corresponding custom "
+            "block pattern to scope the exemption.",
+            allow_re.pattern,
+            allow_desc,
+            ", ".join(shadowed[:3]) + ("..." if len(shadowed) > 3 else ""),
+        )

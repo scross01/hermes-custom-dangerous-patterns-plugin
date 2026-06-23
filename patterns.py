@@ -322,3 +322,94 @@ def _normalize(command: str) -> str:
 
     command = unicodedata.normalize("NFKC", command)
     return command
+
+
+# ---------------------------------------------------------------------------
+# Allow-shadowing analysis (shared by runtime __init__ and CLI)
+# ---------------------------------------------------------------------------
+#
+# These helpers live here -- not in __init__.py or cli.py -- so the runtime
+# path and the CLI path share ONE implementation. Previously the logic was
+# duplicated and the two copies diverged: the CLI's coverage check treated a
+# block pattern as "covering" an allow's shadowing if it overlapped *any*
+# built-in, instead of the specific built-ins the allow shadows. That
+# suppressed real shadowing warnings -- the unsafe direction for a safety
+# plugin. Keeping a single source of truth prevents that drift recurring.
+
+
+def _extract_tokens(pattern: str) -> list[str]:
+    """Extract word-like tokens (length >= 3) from a regex for overlap checks.
+
+    Strips word-boundary markers (``\\b``) and regex metacharacters, then
+    returns whitespace-separated tokens at least 3 characters long.
+    """
+    cleaned = re.sub(r"\\b", " ", pattern)
+    cleaned = re.sub(r"[\\*+?.^$()\[\]{}|]", " ", cleaned)
+    return [t for t in cleaned.split() if len(t) >= 3]
+
+
+def _patterns_overlap(re1: re.Pattern, re2: re.Pattern) -> bool:
+    """Heuristic: could two compiled regexes match overlapping strings?
+
+    Broad patterns (``.*``, ``.+``, ``^.*$``) in *either* operand shadow
+    everything. Otherwise, patterns sharing a word-like token (>= 3 chars)
+    are treated as overlapping. Not exact, but catches the dangerous cases.
+    """
+    p1, p2 = re1.pattern, re2.pattern
+    if p1 in (".*", ".+", "^.*$") or p2 in (".*", ".+", "^.*$"):
+        return True
+    tokens1 = set(_extract_tokens(p1))
+    tokens2 = set(_extract_tokens(p2))
+    return bool(tokens1 & tokens2)
+
+
+def find_uncovered_allow_shadowing(
+    allow_compiled: list[tuple[re.Pattern, str]],
+    block_compiled: list[re.Pattern],
+    builtin_compiled: list[tuple[re.Pattern, str]],
+) -> list[tuple[re.Pattern, str, list[str]]]:
+    """Find allow patterns that shadow built-ins with no covering block.
+
+    For each allow pattern, compute the built-ins it could bypass (those
+    whose regex overlaps the allow). A custom block pattern **covers** the
+    shadowing only if it overlaps *every* built-in the allow shadows --
+    scoping coverage to the specific built-ins at risk, not just any.
+
+    Args:
+        allow_compiled: ``[(regex, description), ...]`` of enabled allow
+            patterns.
+        block_compiled: ``[regex, ...]`` of enabled custom block patterns.
+        builtin_compiled: ``[(regex, description), ...]`` of the built-in
+            dangerous patterns to check against (the runtime passes Hermes's
+            live ``DANGEROUS_PATTERNS_COMPILED``; the CLI passes its static
+            snapshot).
+
+    Returns:
+        List of ``(allow_re, allow_desc, [builtin_desc, ...])`` tuples for
+        allow patterns whose shadowing is **not** covered by any single
+        block pattern. Only allow patterns that shadow at least one built-in
+        are considered.
+    """
+    uncovered: list[tuple[re.Pattern, str, list[str]]] = []
+    for allow_re, allow_desc in allow_compiled:
+        shadowed = [
+            builtin_desc
+            for builtin_re, builtin_desc in builtin_compiled
+            if _patterns_overlap(allow_re, builtin_re)
+        ]
+        if not shadowed:
+            continue
+
+        covered = False
+        for block_re in block_compiled:
+            if all(
+                _patterns_overlap(block_re, builtin_re)
+                for builtin_re, _ in builtin_compiled
+                if _patterns_overlap(allow_re, builtin_re)
+            ):
+                covered = True
+                break
+
+        if not covered:
+            uncovered.append((allow_re, allow_desc, shadowed))
+    return uncovered

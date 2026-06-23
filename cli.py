@@ -1926,88 +1926,66 @@ def _config_update_reminder() -> str:
     )
 
 
-def _extract_tokens(pattern: str) -> list[str]:
-    cleaned = re.sub(r"\\b", " ", pattern)
-    cleaned = re.sub(r"[\\*+?.^$()\[\]{}|]", " ", cleaned)
-    return [t for t in cleaned.split() if len(t) >= 3]
-
-
-def _cli_patterns_overlap(re1: re.Pattern, re2: re.Pattern) -> bool:
-    p1, p2 = re1.pattern, re2.pattern
-    if p1 in (".*", ".+", "^.*$") or p2 in (".*", ".+", "^.*$"):
-        return True
-    tokens1 = set(_extract_tokens(p1))
-    tokens2 = set(_extract_tokens(p2))
-    return bool(tokens1 & tokens2)
+# Allow-shadowing overlap helpers (_extract_tokens / _patterns_overlap) and
+# _check_allow_shadowing_for_cli's coverage scoping now live in patterns.py
+# (find_uncovered_allow_shadowing) so the CLI and runtime share one
+# implementation and cannot drift.
 
 
 def _check_allow_shadowing_for_cli(config: dict[str, Any]) -> list[str]:
     """Check if allow patterns shadow built-in patterns, return warning messages.
 
-    CLI-safe version of __init__._check_allow_shadowing() that uses the
+    CLI-safe counterpart of __init__._check_allow_shadowing() that uses the
     static _BUILTIN_PATTERNS snapshot instead of importing tools.approval
-    (which is only available in the Hermes runtime).  Returns a list of
-    warning strings (empty if no shadowing detected).
+    (which is only available in the Hermes runtime). The overlap heuristic
+    and coverage scoping are shared via :func:`patterns.find_uncovered_allow_shadowing`
+    so the CLI and runtime cannot drift.
+
+    Returns a list of warning strings (empty if no shadowing detected).
     """
-    from .patterns import compile_allow_patterns
+    from .patterns import compile_allow_patterns, find_uncovered_allow_shadowing
 
     allow_compiled = compile_allow_patterns(config.get("allow_patterns", []))
     if not allow_compiled:
         return []
 
     block_raw = config.get("patterns", [])
-    block_enabled = [p for p in block_raw if p.get("enabled", True)]
-    block_compiled = []
-    for entry in block_enabled:
+    block_compiled: list[re.Pattern] = []
+    for entry in block_raw:
+        if not entry.get("enabled", True):
+            continue
         try:
             block_compiled.append(re.compile(entry["pattern"], re.IGNORECASE | re.DOTALL))
         except re.error:
             pass
 
+    builtin_compiled: list[tuple[re.Pattern, str]] = []
+    for pat_str, desc in _BUILTIN_PATTERNS:
+        try:
+            builtin_compiled.append((re.compile(pat_str, re.IGNORECASE | re.DOTALL), desc))
+        except re.error:
+            pass
+
+    try:
+        from rich.markup import escape as _rich_escape
+    except ImportError:
+
+        def _rich_escape(s: str) -> str:
+            return s
+
     warnings: list[str] = []
-
-    for allow_re, allow_desc in allow_compiled:
-        shadowed: list[str] = []
-        for pat_str, builtin_desc in _BUILTIN_PATTERNS:
-            try:
-                builtin_re = re.compile(pat_str, re.IGNORECASE | re.DOTALL)
-                if _cli_patterns_overlap(allow_re, builtin_re):
-                    shadowed.append(builtin_desc)
-            except re.error:
-                pass
-
-        if not shadowed:
-            continue
-
-        covered_by_block = False
-        for block_re in block_compiled:
-            for pat_str, _ in _BUILTIN_PATTERNS:
-                try:
-                    builtin_re = re.compile(pat_str, re.IGNORECASE | re.DOTALL)
-                    if _cli_patterns_overlap(block_re, builtin_re):
-                        covered_by_block = True
-                        break
-                except re.error:
-                    pass
-            if covered_by_block:
-                break
-
-        if not covered_by_block:
-            try:
-                from rich.markup import escape as _rich_escape
-            except ImportError:
-
-                def _rich_escape(s: str) -> str:
-                    return s
-            warnings.append(
-                f"[warning]\u26a0[/warning] Allow shadowing: pattern "
-                f"'{_rich_escape(allow_re.pattern)}' "
-                f"({_rich_escape(allow_desc)}) may bypass built-in "
-                f"dangerous patterns: "
-                f"{', '.join(_rich_escape(s) for s in shadowed[:3])}"
-                f"{'...' if len(shadowed) > 3 else ''}. "
-                f"Consider adding a corresponding custom block pattern."
-            )
+    for allow_re, allow_desc, shadowed in find_uncovered_allow_shadowing(
+        allow_compiled, block_compiled, builtin_compiled
+    ):
+        warnings.append(
+            f"[warning]\u26a0[/warning] Allow shadowing: pattern "
+            f"'{_rich_escape(allow_re.pattern)}' "
+            f"({_rich_escape(allow_desc)}) may bypass built-in "
+            f"dangerous patterns: "
+            f"{', '.join(_rich_escape(s) for s in shadowed[:3])}"
+            f"{'...' if len(shadowed) > 3 else ''}. "
+            f"Consider adding a corresponding custom block pattern."
+        )
 
     return warnings
 
