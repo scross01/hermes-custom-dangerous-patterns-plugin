@@ -53,7 +53,7 @@ def register(ctx: Any) -> None:
     # 2. Inject block patterns into DANGEROUS_PATTERNS
     block_compiled = get_block_patterns()
     if block_compiled:
-        from tools.approval import (
+        from tools.approval_detection import (
             DANGEROUS_PATTERNS,
             DANGEROUS_PATTERNS_COMPILED,
         )
@@ -496,7 +496,7 @@ def _check_allow_shadowing(config: dict, is_allow_pattern) -> None:
     """
     import re
 
-    from tools.approval import DANGEROUS_PATTERNS_COMPILED
+    from tools.approval_detection import DANGEROUS_PATTERNS_COMPILED
 
     from .patterns import compile_allow_patterns, find_uncovered_allow_shadowing
 
