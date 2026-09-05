@@ -47,29 +47,6 @@ hermes plugins update custom-dangerous-patterns
 
 Then restart Hermes for the changes to take effect.
 
-### Alternative: Manual clone or symlink
-
-```bash
-git clone https://github.com/scross01/hermes-custom-dangerous-patterns-plugin.git \
-    ~/.hermes/plugins/custom-dangerous-patterns
-```
-
-Or if you already have the source elsewhere:
-
-```bash
-ln -s /path/to/hermes-custom-dangerous-patterns-plugin \
-      ~/.hermes/plugins/custom-dangerous-patterns
-```
-
-**Important:** The directory inside `~/.hermes/plugins/` must be named `custom-dangerous-patterns`
-(with the trailing `s`).
-
-Then enable:
-
-```bash
-hermes plugins enable custom-dangerous-patterns
-```
-
 ### Step 2: Create the config
 
 Easiest — use the interactive bootstrap:
@@ -686,7 +663,6 @@ The `_config_cache` freeze means mid-session edits are ignored, but changes take
 
 ### User-level hardening options (optional, not default)
 
-- Run the agent and Hermes under **different OS accounts** so the agent cannot write to `~/.hermes/custom-dangerous-patterns.yaml` or `~/.hermes/config.yaml`
 - Set config file permissions to `0444` (read-only) for the agent's user
 - Mount the config directory read-only in containerized setups
 - Use `command_allowlist` only for patterns the user personally approved
@@ -779,34 +755,6 @@ export HERMES_CUSTOM_PATTERNS_PATH=/path/to/config-directory/
 
 See [Directory Config Loading](#directory-config-loading) for details.
 
-## Project Structure
-
-```
-hermes-custom-dangerous-patterns-plugin/
-├── plugin.yaml          # Hermes plugin manifest
-├── __init__.py          # register(ctx) — injects patterns, monkey-patches detection
-├── config.py            # YAML loading, validation, caching, integrity checks, save_config()
-├── patterns.py          # Pattern compilation and matching (block, allow, deny)
-├── cli.py               # CLI command handlers (hermes custom-dangerous-patterns ...)
-├── logs.py              # Log extraction and filtering for hermes custom-dangerous-patterns logs
-├── AGENTS.md            # Developer guide: gotchas, testing safety, CLI architecture
-├── examples/
-│   ├── 00-test.yaml                     # Safe, disabled-by-default test patterns
-│   ├── 01-cloud.yaml                    # Cloud CLI tools (aws, az, gcloud, vultr)
-│   ├── 02-infra.yaml                    # Infrastructure as Code (opentofu, docker, podman)
-│   ├── 03-tools.yaml                    # Backup, sync, network scanning, secrets
-│   └── 04-package-managers.yaml         # Package managers (brew, npm, pip, cargo, uv)
-├── tests/
-│   ├── conftest.py       # Test fixtures, mocks, helpers
-│   ├── test_config.py    # Config loading, validation, integrity tests
-│   ├── test_patterns.py  # Pattern compilation and matching tests
-│   ├── test_init.py      # Plugin registration and monkey-patch tests
-│   └── test_cli.py       # CLI command handler tests
-├── README.md            # This file
-├── LICENSE              # MIT
-└── .gitignore
-```
-
 ## Requirements
 
 - Python 3.11+
@@ -816,8 +764,6 @@ hermes-custom-dangerous-patterns-plugin/
 ### Development
 
 ```bash
-git clone https://github.com/scross01/hermes-custom-dangerous-patterns-plugin.git
-cd hermes-custom-dangerous-patterns-plugin
 uv venv --python 3.11 .venv
 uv sync --extra dev
 ```

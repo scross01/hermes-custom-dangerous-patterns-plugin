@@ -1,4 +1,4 @@
-# AGENTS.md — Developer Guide
+# AGENTS
 
 Developer-focused documentation for the custom-dangerous-patterns plugin.
 
