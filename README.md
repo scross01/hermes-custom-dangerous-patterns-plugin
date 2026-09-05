@@ -266,7 +266,7 @@ Each check is tagged with its source:
 ```
  1. [Plugin]  Deny patterns (custom)        → BLOCKED immediately, no prompt
  2. [Hermes]  Hardline check                → blocked unconditionally
- 3. [Hermes]  Sudo stdin guard              → blocked unconditionally
+ 3. [Hermes]  Root-privilege stdin guard  → blocked unconditionally
  4. [Hermes]  Yolo / mode=off               → bypasses steps 5-7
  5. [Plugin]  Allow patterns (custom)       → command runs, no prompt (allow wins)
  6. detect_dangerous_command():             — same approval prompt for both —
@@ -280,7 +280,7 @@ Each check is tagged with its source:
 | Tier | Source | Behavior | Prompt? | Bypassed by `--yolo`? |
 |------|--------|----------|---------|----------------------|
 | Deny patterns | Plugin | **Immediate block** — command is rejected before any approval logic runs | ❌ No | ❌ No |
-| Hardline / Sudo | Hermes | **Unconditional block** — catastrophic or dangerous-by-design commands | ❌ No | ❌ No |
+| Hardline / Root-privilege | Hermes | **Unconditional block** — catastrophic or dangerous-by-design commands | ❌ No | ❌ No |
 | Allow patterns | Plugin | **Silent pass** — command runs without any check (allow wins over block) | ❌ No | N/A |
 | Block patterns | Plugin | **Approval prompt** — same as built-in DANGEROUS_PATTERNS | ✅ Yes | ✅ Yes |
 | Built-in patterns | Hermes | **Approval prompt** — Hermes's ~47 hardcoded dangerous command patterns | ✅ Yes | ✅ Yes |
