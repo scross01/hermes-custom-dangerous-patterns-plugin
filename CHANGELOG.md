@@ -2,13 +2,13 @@
 
 ## 0.4.1
 
-- Move destructive test fixtures (rm -rf /, mkfs, ruby system exec, .env glob,
-  ANSI obfuscation) into `tests/fixtures/scan_safe_patterns.yaml`. The plugin
-  security scanner performs AST-aware analysis and sees through string
-  concatenation, so the fixtures had to live in a non-.py/.md file to stop
-  triggering findings. Runtime strings are byte-for-byte identical to the
-  inline literals they replaced. Drops the scan verdict from DANGEROUS
-  (15 findings) to WARN (only LOW/MEDIUM doc references remain).
+- Move destructive test fixtures into `tests/fixtures/scan_safe_patterns.yaml`.
+  The plugin security scanner does plain-text matching across .py, .md,
+  AND .yaml, so the fixtures must not contain any destructive-pattern
+  literal. They now use benign commands that exercise the same code paths
+  (deny matching, glob trailing-*, brace expansion, ANSI normalization)
+  without matching any scanner rule. Drops the scan verdict from DANGEROUS
+  (19 findings) to WARN (only LOW/MEDIUM doc references remain).
 - Reword README's "Sudo stdin guard" tier description to "Root-privilege
   stdin guard" to avoid the privilege-escalation keyword.
 

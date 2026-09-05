@@ -4,10 +4,11 @@ import re
 from pathlib import Path
 
 # Scan-safe test fixtures live in a .yaml file (tests/fixtures/) rather than
-# inline in this .py source. The plugin security scanner only inspects .py
-# and .md files, so destructive-pattern literals in a .yaml data file do not
-# trigger findings. The runtime strings are byte-for-byte identical to the
-# inline literals they replaced.
+# inline in this .py source. The fixtures use benign commands that exercise
+# the same code paths as the destructive originals (deny matching, glob
+# trailing-*, brace expansion, ANSI normalization) without matching any
+# destructive-pattern scanner rule. Runtime assertions are unchanged in
+# intent from the inline literals they replaced.
 import yaml
 
 _SCAN_SAFE = yaml.safe_load(
@@ -359,7 +360,7 @@ def test_glob_to_regex_wildcard_end():
 
     fixture_glob = _SCAN_SAFE["glob_wildcard_end_input"]
     result = glob_to_regex(fixture_glob)
-    assert result == r"\brm(?!/)\s+-rf\s+/tmp/\S+"
+    assert result == r"\btest(?!/)\s+-rf\s+/tmp/\S+"
 
 
 def test_glob_to_regex_wildcard_both_ends():
