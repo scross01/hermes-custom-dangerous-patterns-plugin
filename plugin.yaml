@@ -1,12 +1,17 @@
 name: custom-dangerous-patterns
-version: "0.3.4"
+version: "0.4.0"
+manifest_version: 2
 description: >-
   Add custom dangerous command patterns to Hermes's built-in approval
-  system. Users define regex patterns in ~/.hermes/custom-dangerous-patterns.yaml;
-  the plugin injects them into DANGEROUS_PATTERNS so they get the same
-  once/session/always/deny approval flow.
+  system. Users define regex patterns in YAML; the plugin injects them
+  into DANGEROUS_PATTERNS at startup and registers a pre_tool_call hook
+  to enforce deny patterns. No built-in tools are overridden.
+provides_hooks:
+  - pre_tool_call
+provides_cli_commands:
+  - custom-dangerous-patterns
 author: Stephen Cross
 license: MIT
-dependencies:
-  - ruamel.yaml>=0.18.0
-  - rich>=13.0.0
+python_dependencies:
+  - "ruamel.yaml>=0.18,<0.20"
+  - "rich>=13.0.0,<14"

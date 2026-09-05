@@ -28,6 +28,7 @@ logger = logging.getLogger(__name__)
 try:
     from .logfile import log_match
 except ImportError:
+
     def log_match(*args: Any, **kwargs: Any) -> None:  # type: ignore[misc]
         pass
 
@@ -58,14 +59,20 @@ def register(ctx: Any) -> None:
             DANGEROUS_PATTERNS_COMPILED,
         )
 
+        # Record the original list length BEFORE we inject, so the CLI's
+        # --builtins view can slice off our injected entries and only show
+        # Hermes's true built-ins (labelled correctly as [Hermes]).
+        from . import patterns as _patterns_singleton
+
+        _patterns_singleton.set_builtins_initial_length(len(DANGEROUS_PATTERNS))
+
         for regex_obj, desc in block_compiled:
             DANGEROUS_PATTERNS.append((regex_obj.pattern, desc))
             DANGEROUS_PATTERNS_COMPILED.append((regex_obj, desc))
 
         block_count = len(block_compiled)
         logger.info(
-            "custom-dangerous-patterns: injected %d block patterns into "
-            "DANGEROUS_PATTERNS",
+            "custom-dangerous-patterns: injected %d block patterns into DANGEROUS_PATTERNS",
             block_count,
         )
 
@@ -83,8 +90,7 @@ def register(ctx: Any) -> None:
         _patch_detect_function(is_allow_pattern)
         allow_count = len([p for p in allow_patterns if p.get("enabled", True)])
         logger.info(
-            "custom-dangerous-patterns: patched detect_dangerous_command with "
-            "%d allow patterns",
+            "custom-dangerous-patterns: patched detect_dangerous_command with %d allow patterns",
             allow_count,
         )
         # Check for allow patterns that shadow built-in dangerous patterns
@@ -97,17 +103,23 @@ def register(ctx: Any) -> None:
         _patch_deny_handler(is_deny_pattern, is_allow_pattern)
         deny_count = len([p for p in deny_patterns if p.get("enabled", True)])
         logger.info(
-            "custom-dangerous-patterns: patched check_all_command_guards with "
-            "%d deny patterns",
+            "custom-dangerous-patterns: patched check_all_command_guards with %d deny patterns",
             deny_count,
         )
 
-        # 5. Register pre_tool_call hook to catch deny patterns BEFORE
-        #    the terminal tool executes. This ensures the agent's blocked-
-        #    tool handling kicks in (skip tool, return block message to LLM).
-        #    Without this, deny patterns are checked inside the terminal
-        #    tool and the agent treats the result as a regular error.
-        ctx.register_hook("pre_tool_call", _make_deny_hook(is_deny_pattern, is_allow_pattern))
+    # 5. Always register the pre_tool_call hook so the manifest's
+    #    provides_hooks declaration matches runtime registration (Hermes
+    #    doctor warns when they disagree). The hook is a no-op when no deny
+    #    patterns are configured — it still intercepts every terminal call
+    #    but returns None without matching anything, so zero overhead beyond
+    #    one Python function call per terminal invocation.
+    #
+    #    The hook is the *primary* deny enforcement path: it fires BEFORE
+    #    the terminal tool executes, so the agent's blocked-tool handling
+    #    kicks in (skip tool, return block message to LLM). Without it, deny
+    #    patterns are only checked inside the terminal tool and the agent
+    #    treats the result as a regular error.
+    ctx.register_hook("pre_tool_call", _make_deny_hook(is_deny_pattern, is_allow_pattern))
 
     # 6. Register CLI subcommands
     _register_cli(ctx)
@@ -250,8 +262,7 @@ def _patch_detect_function(allow_checker) -> None:
             # Log the allow match with pattern details
             _log_allow_match(command)
             logger.debug(
-                "custom-dangerous-patterns: command exempt via allow pattern "
-                "(%s): %s",
+                "custom-dangerous-patterns: command exempt via allow pattern (%s): %s",
                 allow_match,
                 command[:80],
             )
@@ -349,8 +360,7 @@ def _patch_deny_handler(deny_checker, allow_checker=None) -> None:
             # Log the deny match with pattern details
             _log_deny_match(command)
             logger.info(
-                "custom-dangerous-patterns: command blocked by deny pattern "
-                "(%s): %s",
+                "custom-dangerous-patterns: command blocked by deny pattern (%s): %s",
                 deny_match,
                 command[:80],
             )
@@ -377,11 +387,11 @@ def _patch_deny_handler(deny_checker, allow_checker=None) -> None:
     # Without this, terminal_tool calls the original (unpatched) function.
     try:
         from tools import terminal_tool as _tt
+
         if hasattr(_tt, "_check_all_guards_impl"):
             _tt._check_all_guards_impl = _patched
             logger.info(
-                "custom-dangerous-patterns: also patched "
-                "terminal_tool._check_all_guards_impl"
+                "custom-dangerous-patterns: also patched terminal_tool._check_all_guards_impl"
             )
     except ImportError:
         pass
@@ -452,8 +462,7 @@ def _patch_detect_function_for_deny(deny_checker, allow_checker=None) -> None:
             allow_match = allow_checker(command)
             if allow_match is not None:
                 logger.debug(
-                    "custom-dangerous-patterns: command exempt via allow "
-                    "pattern (%s): %s",
+                    "custom-dangerous-patterns: command exempt via allow pattern (%s): %s",
                     allow_match,
                     command[:80],
                 )
@@ -465,8 +474,7 @@ def _patch_detect_function_for_deny(deny_checker, allow_checker=None) -> None:
             # Log the deny match with pattern details
             _log_deny_match(command)
             logger.info(
-                "custom-dangerous-patterns: command blocked by deny pattern "
-                "(%s): %s",
+                "custom-dangerous-patterns: command blocked by deny pattern (%s): %s",
                 deny_match,
                 command[:80],
             )
@@ -507,9 +515,7 @@ def _check_allow_shadowing(config: dict, is_allow_pattern) -> None:
         if not entry.get("enabled", True):
             continue
         try:
-            block_compiled.append(
-                re.compile(entry["pattern"], re.IGNORECASE | re.DOTALL)
-            )
+            block_compiled.append(re.compile(entry["pattern"], re.IGNORECASE | re.DOTALL))
         except re.error:
             pass
 

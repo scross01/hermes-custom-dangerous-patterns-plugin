@@ -33,7 +33,7 @@ The repo has a comprehensive test suite under `tests/` using pytest. Tests cover
 
 ## Testing Safety
 
-- **Never use real dangerous commands** (`rm -rf /`, `DROP DATABASE`, `git push --force`) when testing approval/blocking logic.
+- **Never use real destructive commands** (e.g. recursive forced removal at filesystem root, dropping production databases, force-pushing shared branches) when testing approval/blocking logic.
 - ALWAYS use the provided test patterns from `examples/00-test.yaml` (all `enabled: false` by default)
 - Test patterns are named `[TEST]` and are safe by design:
   - File operations are scoped to `/tmp/` (ephemeral, no data loss)

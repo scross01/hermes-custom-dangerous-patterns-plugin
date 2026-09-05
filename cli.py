@@ -33,7 +33,8 @@ def cmd_list(
     search: str | None = None,
     disabled: bool = False,
     enabled: bool = False,
-    builtins: bool = False,        ) -> tuple[str, str, int]:
+    builtins: bool = False,
+) -> tuple[str, str, int]:
     """List all user-defined patterns with their type, status, and description."""
     from .config import load_config, resolve_config_path
 
@@ -87,8 +88,7 @@ def cmd_list(
             filtered = [
                 e
                 for e in filtered
-                if term in e.get("description", "").lower()
-                or term in e.get("pattern", "").lower()
+                if term in e.get("description", "").lower() or term in e.get("pattern", "").lower()
             ]
 
         if not filtered:
@@ -142,7 +142,8 @@ def cmd_list(
 def cmd_test(
     command: str,
     verbose: bool = False,
-    skip_builtins: bool = False,        ) -> tuple[str, str, int]:
+    skip_builtins: bool = False,
+) -> tuple[str, str, int]:
     """Test a command against all pattern types and show the result.
 
     Simulates the exact evaluation order used at runtime:
@@ -219,31 +220,39 @@ def cmd_test(
     # Determine result
     lines.append("")
     if deny_match is not None:
-        lines.append(result_panel(
-            "DENY",
-            "command BLOCKED immediately, no prompt shown",
-            "red",
-        ))
+        lines.append(
+            result_panel(
+                "DENY",
+                "command BLOCKED immediately, no prompt shown",
+                "red",
+            )
+        )
     elif allow_match is not None:
-        lines.append(result_panel(
-            "ALLOW",
-            "command runs immediately, no prompt shown",
-            "green",
-        ))
+        lines.append(
+            result_panel(
+                "ALLOW",
+                "command runs immediately, no prompt shown",
+                "green",
+            )
+        )
         if block_matches:
             lines.append(muted("(Block patterns skipped — allow wins over block)"))
     elif block_matches or (not skip_builtins and _check_builtins_for_test(command, False)):
-        lines.append(result_panel(
-            "APPROVAL PROMPT",
-            "user will see (o)nce/(s)ession/(a)lways/(d)eny",
-            "yellow",
-        ))
+        lines.append(
+            result_panel(
+                "APPROVAL PROMPT",
+                "user will see (o)nce/(s)ession/(a)lways/(d)eny",
+                "yellow",
+            )
+        )
     else:
-        lines.append(result_panel(
-            "PASS",
-            "no patterns matched. Command would run normally",
-            "green",
-        ))
+        lines.append(
+            result_panel(
+                "PASS",
+                "no patterns matched. Command would run normally",
+                "green",
+            )
+        )
 
     return ("\n".join(lines) + "\n", 0)
 
@@ -259,6 +268,7 @@ def _normalize_for_test(command: str) -> str:
     cmd = command
     try:
         from tools.ansi_strip import strip_ansi
+
         cmd = strip_ansi(cmd)
     except ImportError:
         cmd = _re.sub(r"\x1b\[[0-9;]*[a-zA-Z]", "", cmd)
@@ -277,7 +287,7 @@ def _check_builtins_for_test(
 
     cmd = _normalize_for_test(command)
     matches: list[str] = []
-    for pat, desc in _BUILTIN_PATTERNS:
+    for pat, desc in _get_builtin_patterns():
         try:
             if _re.search(pat, cmd, _re.IGNORECASE | _re.DOTALL):
                 if verbose:
@@ -291,7 +301,8 @@ def _check_builtins_for_test(
 
 def cmd_init(
     with_examples: bool = False,
-    force: bool = False,        ) -> tuple[str, str, int]:
+    force: bool = False,
+) -> tuple[str, str, int]:
     """Create a starter config directory and guide the user.
 
     Creates ~/.hermes/custom-dangerous-patterns/ (a directory) with
@@ -343,8 +354,7 @@ def cmd_init(
 
     lines = [
         success(
-            f"Created: [path]{config_path}/[/path]"
-            f" [dim]({', '.join(sorted(saved_files))})[/dim]"
+            f"Created: [path]{config_path}/[/path] [dim]({', '.join(sorted(saved_files))})[/dim]"
         ),
         f"  [dim]{total_block} block, {total_allow} allow, {total_deny} deny patterns[/dim]",
         "",
@@ -463,26 +473,30 @@ def cmd_enable(
     target: str | None = None,
     pattern_type: str | None = None,
     group: str | None = None,
-    dry_run: bool = False,        ) -> tuple[str, str, int]:
+    dry_run: bool = False,
+) -> tuple[str, str, int]:
     """Enable patterns by index, description, or group.
 
     With no arguments, launches interactive selection.
     """
-    return _toggle_patterns(enable=True, target=target, pattern_type=pattern_type,
-                            group=group, dry_run=dry_run)
+    return _toggle_patterns(
+        enable=True, target=target, pattern_type=pattern_type, group=group, dry_run=dry_run
+    )
 
 
 def cmd_disable(
     target: str | None = None,
     pattern_type: str | None = None,
     group: str | None = None,
-    dry_run: bool = False,        ) -> tuple[str, str, int]:
+    dry_run: bool = False,
+) -> tuple[str, str, int]:
     """Disable patterns by index, description, or group.
 
     With no arguments, launches interactive selection.
     """
-    return _toggle_patterns(enable=False, target=target, pattern_type=pattern_type,
-                            group=group, dry_run=dry_run)
+    return _toggle_patterns(
+        enable=False, target=target, pattern_type=pattern_type, group=group, dry_run=dry_run
+    )
 
 
 def _toggle_patterns(
@@ -490,7 +504,8 @@ def _toggle_patterns(
     target: str | None,
     pattern_type: str | None,
     group: str | None,
-    dry_run: bool,        ) -> tuple[str, str, int]:
+    dry_run: bool,
+) -> tuple[str, str, int]:
     """Shared implementation for enable/disable commands.
 
     When no target, group, or type is specified, launches interactive
@@ -544,10 +559,7 @@ def _toggle_patterns(
 
         # Fall back to description substring match
         if not matched:
-            matched = [
-                e for e in all_entries
-                if target.lower() in e.get("description", "").lower()
-            ]
+            matched = [e for e in all_entries if target.lower() in e.get("description", "").lower()]
             if pattern_type:
                 type_map = {"block": "patterns", "allow": "allow_patterns", "deny": "deny_patterns"}
                 section = type_map.get(pattern_type.lower(), "")
@@ -584,9 +596,7 @@ def _toggle_patterns(
     already = [e for e in matched if e.get("enabled", True) == new_state]
     if already and not dry_run:
         names = ", ".join(
-            f'[{get_index(e, all_entries)}] '
-            f'[bold]"{e["description"]}"[/bold]'
-            for e in already
+            f'[{get_index(e, all_entries)}] [bold]"{e["description"]}"[/bold]' for e in already
         )
         return (f"[dim]Pattern(s) already {action}: {names}[/dim]\n", 0)
 
@@ -624,7 +634,8 @@ def _toggle_interactive(
     config_path: Path,
     all_entries: list[dict[str, Any]],
     enable: bool,
-    dry_run: bool,        ) -> tuple[str, str, int]:
+    dry_run: bool,
+) -> tuple[str, str, int]:
     """Interactive enable/disable with numbered selection."""
     from rich.text import Text
 
@@ -714,7 +725,7 @@ def _toggle_interactive(
     # Check protected (only on disable)
     if not enable and entry.get("protected"):
         return (
-            f"Pattern [{idx}] \"{entry['description']}\" is protected.\n"
+            f'Pattern [{idx}] "{entry["description"]}" is protected.\n'
             f"Edit the config file directly to modify protected patterns.\n",
             1,
         )
@@ -722,10 +733,10 @@ def _toggle_interactive(
     # Check if already in desired state
     already = entry.get("enabled", True) == enable
     if already:
-        return (f"Pattern [{idx}] \"{entry['description']}\" is already {action_past}.\n", 0)
+        return (f'Pattern [{idx}] "{entry["description"]}" is already {action_past}.\n', 0)
 
     type_label = entry["_section"].replace("_patterns", "").upper()
-    print(f"\nYou selected: [{idx}] \"{entry['description']}\" ({type_label})")
+    print(f'\nYou selected: [{idx}] "{entry["description"]}" ({type_label})')
 
     try:
         confirm = input(f"{action.capitalize()} this pattern? [y/N]: ").strip().lower()
@@ -738,7 +749,7 @@ def _toggle_interactive(
     if dry_run:
         return (
             f"Would {action} {type_label} pattern [{idx}]: "
-            f"\"{entry['description']}\"\n"
+            f'"{entry["description"]}"\n'
             f"Use without --dry-run to confirm.\n",
             0,
         )
@@ -755,7 +766,7 @@ def _toggle_interactive(
 
     return (
         f"\u2713 {action_past.capitalize()} {type_label} pattern [{idx}]: "
-        f"\"{entry['description']}\"\n"
+        f'"{entry["description"]}"\n'
         f"{_config_update_reminder()}",
         0,
     )
@@ -763,7 +774,8 @@ def _toggle_interactive(
 
 def cmd_validate(
     path: str | None = None,
-    quiet: bool = False,        ) -> tuple[str, str, int]:
+    quiet: bool = False,
+) -> tuple[str, str, int]:
     """Validate config syntax and regexes."""
     from .config import _load_yaml, _validate_config, resolve_config_path
     from .display import check, cross, path_info, success, warn_mark
@@ -831,8 +843,10 @@ def cmd_validate(
             pat = entry.get("pattern", "")
             if pat in (".*", ".+", "^.*$"):
                 warnings.append(
-                    warn_mark(f"{section_label}[{i}] regex warning: "
-                    f"pattern '[bold]{pat}[/bold]' matches everything")
+                    warn_mark(
+                        f"{section_label}[{i}] regex warning: "
+                        f"pattern '[bold]{pat}[/bold]' matches everything"
+                    )
                 )
 
             # Warn if glob and pattern disagree
@@ -856,10 +870,12 @@ def cmd_validate(
         lines.extend(warnings)
 
     lines.append("")
-    lines.append(success(
-        f"All regexes compile successfully "
-        f"[dim](patterns: {block_count} block, {allow_count} allow, {deny_count} deny)[/dim]"
-    ))
+    lines.append(
+        success(
+            f"All regexes compile successfully "
+            f"[dim](patterns: {block_count} block, {allow_count} allow, {deny_count} deny)[/dim]"
+        )
+    )
     lines.append("")
     lines.append("[bold green]Result: VALID[/bold green] — config is well-formed")
 
@@ -902,10 +918,7 @@ def cmd_info() -> tuple[str, int]:
     if not config_path.exists():
         lines.append(cross("Config: not found"))
         lines.append(
-            muted(
-                "  Run `hermes custom-dangerous-patterns init`"
-                " to create a starter config."
-            )
+            muted("  Run `hermes custom-dangerous-patterns init` to create a starter config.")
         )
         return ("\n".join(lines) + "\n", 0)
 
@@ -926,9 +939,7 @@ def cmd_info() -> tuple[str, int]:
             if prev_hash:
                 raw_text = _load_raw_config_text(config_path)
                 if raw_text:
-                    current_hash = hashlib.sha256(
-                        raw_text.encode("utf-8")
-                    ).hexdigest()
+                    current_hash = hashlib.sha256(raw_text.encode("utf-8")).hexdigest()
                     if current_hash == prev_hash:
                         lines.append(check("Integrity: hash matches previous session"))
                     else:
@@ -939,8 +950,9 @@ def cmd_info() -> tuple[str, int]:
             content_files = _config_content_files(config_path)
             mtime = max(os.path.getmtime(str(p)) for p in content_files)
             lines.append(
-                muted(f"  Last changed: "
-                f"{datetime.fromtimestamp(mtime).strftime('%Y-%m-%d %H:%M:%S')}")
+                muted(
+                    f"  Last changed: {datetime.fromtimestamp(mtime).strftime('%Y-%m-%d %H:%M:%S')}"
+                )
             )
         except Exception:
             lines.append(muted("  Integrity: unknown"))
@@ -965,14 +977,10 @@ def cmd_info() -> tuple[str, int]:
                 f" {disabled} disabled)[/dim]"
             )
         elif active:
-            lines.append(
-                f"  [bold]{label}:[/bold] {len(entries):>3}"
-                f" [dim]({active} active)[/dim]"
-            )
+            lines.append(f"  [bold]{label}:[/bold] {len(entries):>3} [dim]({active} active)[/dim]")
         elif entries:
             lines.append(
-                f"  [bold]{label}:[/bold] {len(entries):>3}"
-                f" [dim]({disabled} disabled)[/dim]"
+                f"  [bold]{label}:[/bold] {len(entries):>3} [dim]({disabled} disabled)[/dim]"
             )
         else:
             lines.append(f"  [bold]{label}:[/bold] {len(entries):>3}")
@@ -1030,7 +1038,8 @@ def cmd_logs(
     level: str | None = None,
     limit: int = 100,
     since: str | None = None,
-    follow: bool = False,        ) -> tuple[str, str, int]:
+    follow: bool = False,
+) -> tuple[str, str, int]:
     """Show plugin-specific log entries from the Hermes log and match log.
 
     Reads from both Hermes's standard Python log (filtered for
@@ -1077,6 +1086,7 @@ def cmd_logs(
     footer = muted(f"Sources: {'; '.join(source_parts)}") if source_parts else ""
     # Return Text lines and footer separately
     from rich.text import Text as _Text
+
     combined = _Text("\n").join(lines) if lines else _Text()
     return (combined, footer, 0)
 
@@ -1091,7 +1101,8 @@ def cmd_add(
     protected: bool = False,
     dry_run: bool = False,
     glob_str: str | None = None,
-    target_file: str | None = None,        ) -> tuple[str, str, int]:
+    target_file: str | None = None,
+) -> tuple[str, str, int]:
     """Add a custom pattern via interactive prompts or CLI flags.
 
     With no arguments, launches interactive entry automatically.
@@ -1158,15 +1169,27 @@ def cmd_add(
         )
 
     return _add_noninteractive(
-        config, config_path, pattern_type, pattern, description,
-        group or "", examples or [], enabled_flag if enabled_flag is not None else True,
-        protected, dry_run, glob_str if glob_str else None, target_file,
+        config,
+        config_path,
+        pattern_type,
+        pattern,
+        description,
+        group or "",
+        examples or [],
+        enabled_flag if enabled_flag is not None else True,
+        protected,
+        dry_run,
+        glob_str if glob_str else None,
+        target_file,
     )
 
 
 def _add_interactive(
-    config: dict[str, Any], config_path: Path, dry_run: bool,
-    target_file: str | None = None,        ) -> tuple[str, str, int]:
+    config: dict[str, Any],
+    config_path: Path,
+    dry_run: bool,
+    target_file: str | None = None,
+) -> tuple[str, str, int]:
     """Guided interactive pattern entry with glob-to-regex support.
 
     Flow:
@@ -1195,9 +1218,7 @@ def _add_interactive(
 
     # --- Glob entry ---
     try:
-        glob_input = input(
-            "Enter a glob-style pattern (or press Enter for raw regex): "
-        ).strip()
+        glob_input = input("Enter a glob-style pattern (or press Enter for raw regex): ").strip()
     except (EOFError, KeyboardInterrupt):
         return ("\nCancelled.\n", 1)
 
@@ -1243,9 +1264,7 @@ def _add_interactive(
     # --- Example testing ---
     example: str = ""
     try:
-        ex_input = input(
-            "\nEnter an example command to test (press Enter to skip): "
-        ).strip()
+        ex_input = input("\nEnter an example command to test (press Enter to skip): ").strip()
     except (EOFError, KeyboardInterrupt):
         return ("\nCancelled.\n", 1)
 
@@ -1274,14 +1293,9 @@ def _add_interactive(
                         pattern = glob_to_regex(glob_input)
                         print(f"Generated regex: {pattern}")
                         try:
-                            compiled = re.compile(
-                                pattern, re.IGNORECASE | re.DOTALL
-                            )
+                            compiled = re.compile(pattern, re.IGNORECASE | re.DOTALL)
                         except re.error as compile_exc:
-                            print(
-                                f"  Error: generated regex is invalid: "
-                                f"{compile_exc}"
-                            )
+                            print(f"  Error: generated regex is invalid: {compile_exc}")
                         else:
                             print("Re-testing...")
                             if compiled.search(example):
@@ -1329,9 +1343,18 @@ def _add_interactive(
         return ("\nCancelled.\n", 1)
 
     return _add_noninteractive(
-        config, config_path, pattern_type, pattern, description,
-        group, [example] if example else [], enabled_flag, protected, dry_run,
-        glob_str if glob_str else None, target_file,
+        config,
+        config_path,
+        pattern_type,
+        pattern,
+        description,
+        group,
+        [example] if example else [],
+        enabled_flag,
+        protected,
+        dry_run,
+        glob_str if glob_str else None,
+        target_file,
     )
 
 
@@ -1347,7 +1370,8 @@ def _add_noninteractive(
     protected: bool,
     dry_run: bool,
     glob_str: str | None = None,
-    target_file: str | None = None,        ) -> tuple[str, str, int]:
+    target_file: str | None = None,
+) -> tuple[str, str, int]:
     """Add a pattern via CLI flags."""
     from .config import append_to_yaml_file, save_config
 
@@ -1387,23 +1411,26 @@ def _add_noninteractive(
             "[bold]Would add pattern:[/bold]",
             f"  [bold]Type:[/bold] {pattern_type}",
             f"  [bold]Description:[/bold] {description}",
-            f"  [bold]Pattern:[/bold] {pattern}"
+            f"  [bold]Pattern:[/bold] {pattern}",
         ]
         if target_file:
             lines.append(f"  [bold]Target file:[/bold] {target_file}")
         if glob_str:
             lines.append(f"  [bold]Glob:[/bold] {glob_str}")
-        lines.extend([
-            f"  [bold]Group:[/bold] {group or '(none)'}",
-            f"  [bold]Enabled:[/bold] {enabled_flag}",
-            f"  [bold]Protected:[/bold] {protected}",
-        ])
+        lines.extend(
+            [
+                f"  [bold]Group:[/bold] {group or '(none)'}",
+                f"  [bold]Enabled:[/bold] {enabled_flag}",
+                f"  [bold]Protected:[/bold] {protected}",
+            ]
+        )
         return ("\n".join(lines) + "\n", 0)
 
     if target_file:
         # Write directly to the target file (skip save_config delta).
         # Clean the entry first for proper YAML field order.
         from .config import _clean_for_serialization
+
         clean_entry = _clean_for_serialization([entry])[0]
         append_to_yaml_file(clean_entry, target_path, section_key)
         # Calculate approximate index for display
@@ -1420,13 +1447,14 @@ def _add_noninteractive(
     shadow_warnings = ""
     if pattern_type == "allow":
         from .patterns import compile_all
+
         compile_all(config)
         sw = _check_allow_shadowing_for_cli(config)
         if sw:
             shadow_warnings = "\n" + "\n".join(sw) + "\n"
 
     return (
-        f"[success]✓[/success] Added {pattern_type} pattern: [bold]\"{description}\"[/bold]\n"
+        f'[success]✓[/success] Added {pattern_type} pattern: [bold]"{description}"[/bold]\n'
         f"{file_info}"
         f"  Index: [{index}]\n"
         f"{shadow_warnings}"
@@ -1439,7 +1467,8 @@ def cmd_remove(
     target: str | None = None,
     pattern_type: str | None = None,
     dry_run: bool = False,
-    force: bool = False,        ) -> tuple[str, str, int]:
+    force: bool = False,
+) -> tuple[str, str, int]:
     """Remove a pattern interactively or by index/description.
 
     With no target, launches interactive selection automatically.
@@ -1478,7 +1507,8 @@ def _remove_interactive(
     config: dict[str, Any],
     config_path: Path,
     all_entries: list[dict[str, Any]],
-    dry_run: bool,        ) -> tuple[str, str, int]:
+    dry_run: bool,
+) -> tuple[str, str, int]:
     """Interactive pattern removal with numbered selection."""
     from rich.text import Text
 
@@ -1549,13 +1579,13 @@ def _remove_interactive(
     # Check protected
     if entry.get("protected"):
         return (
-            f"Pattern [{idx}] \"{entry['description']}\" is protected.\n"
+            f'Pattern [{idx}] "{entry["description"]}" is protected.\n'
             f"Edit the config file directly to remove protected patterns.\n",
             1,
         )
 
     type_label = entry["_section"].replace("_patterns", "").upper()
-    print(f"\nYou selected: [{idx}] \"{entry['description']}\" ({type_label})")
+    print(f'\nYou selected: [{idx}] "{entry["description"]}" ({type_label})')
 
     try:
         confirm = input("Remove this pattern? This cannot be undone. [y/N]: ").strip().lower()
@@ -1567,7 +1597,7 @@ def _remove_interactive(
 
     if dry_run:
         return (
-            f"Would remove {type_label} pattern [{idx}]: \"{entry['description']}\"\n"
+            f'Would remove {type_label} pattern [{idx}]: "{entry["description"]}"\n'
             f"Use without --dry-run to confirm.\n",
             0,
         )
@@ -1584,7 +1614,7 @@ def _remove_interactive(
     save_config(config, config_path)
 
     return (
-        f"\u2713 Removed {type_label} pattern [{idx}]: \"{entry['description']}\"\n"
+        f'\u2713 Removed {type_label} pattern [{idx}]: "{entry["description"]}"\n'
         f"The pattern is permanently deleted.\n"
         f"{_config_update_reminder()}",
         0,
@@ -1598,7 +1628,8 @@ def _remove_by_target(
     target: str,
     pattern_type: str | None,
     dry_run: bool,
-    force: bool = False,        ) -> tuple[str, str, int]:
+    force: bool = False,
+) -> tuple[str, str, int]:
     """Non-interactive pattern removal by index or description match.
 
     Shows the matched pattern and requests confirmation before removing,
@@ -1626,10 +1657,7 @@ def _remove_by_target(
 
     # Fall back to description substring match
     if not matched:
-        matched = [
-            e for e in all_entries
-            if target.lower() in e.get("description", "").lower()
-        ]
+        matched = [e for e in all_entries if target.lower() in e.get("description", "").lower()]
         if pattern_type:
             type_map = {"block": "patterns", "allow": "allow_patterns", "deny": "deny_patterns"}
             section = type_map.get(pattern_type.lower(), "")
@@ -1663,7 +1691,7 @@ def _remove_by_target(
     if entry.get("protected"):
         return (
             f"[error]✗[/error] Pattern [{eidx}]"
-            f" [bold]\"{entry['description']}\"[/bold]"
+            f' [bold]"{entry["description"]}"[/bold]'
             f" is protected.\n"
             f"Edit the config file directly to"
             f" remove protected patterns.\n",
@@ -1674,7 +1702,7 @@ def _remove_by_target(
         return (
             f"[bold]Would remove {type_label}"
             f" pattern [{eidx}]:[/bold]"
-            f" [bold]\"{entry['description']}\"[/bold]\n"
+            f' [bold]"{entry["description"]}"[/bold]\n'
             f"Use without --dry-run to confirm.\n",
             0,
         )
@@ -1684,13 +1712,10 @@ def _remove_by_target(
         desc_safe = _rich_escape(entry["description"])
         render_and_print("")
         render_and_print(
-            f"[bold]Matched pattern:[/bold] [{eidx}] "
-            f"[bold]{type_label}:[/bold] {desc_safe}"
+            f"[bold]Matched pattern:[/bold] [{eidx}] [bold]{type_label}:[/bold] {desc_safe}"
         )
         try:
-            confirm = input(
-                "Remove this pattern? This cannot be undone. [y/N]: "
-            ).strip().lower()
+            confirm = input("Remove this pattern? This cannot be undone. [y/N]: ").strip().lower()
         except (EOFError, KeyboardInterrupt):
             return ("\nCancelled.\n", 1)
         if confirm != "y":
@@ -1709,7 +1734,7 @@ def _remove_by_target(
     return (
         f"[success]✓[/success] Removed {type_label}"
         f" pattern [{eidx}]:"
-        f" [bold]\"{entry['description']}\"[/bold]\n"
+        f' [bold]"{entry["description"]}"[/bold]\n'
         f"[dim]The pattern is permanently deleted.[/dim]\n"
         f"{_config_update_reminder()}",
         0,
@@ -1835,18 +1860,22 @@ def _emit(output, exit_code: int, footer: str = "") -> None:
     if output:
         try:
             from rich.text import Text as _Text
+
             _has_rich_text = True
         except ImportError:
             _has_rich_text = False
 
         if _has_rich_text and isinstance(output, _Text):
             from .display import _console
+
             _console.print(output)
         else:
             from .display import render_and_print
+
             render_and_print(output)
     if footer:
         from .display import render_and_print
+
         render_and_print("\n" + footer)
     sys.exit(exit_code)
 
@@ -1856,59 +1885,40 @@ def _emit(output, exit_code: int, footer: str = "") -> None:
 # ---------------------------------------------------------------------------
 
 
-# Snapshot of Hermes built-in DANGEROUS_PATTERNS for --builtins display.
-# These are the ~47 patterns Hermes ships with. The list is a static
-# reference bundled at plugin release time.
-_BUILTIN_PATTERNS: list[tuple[str, str]] = [
-    (r"\brm\s+(-[a-zA-Z]*r[a-zA-Z]*f|-[a-zA-Z]*f[a-zA-Z]*r)\b", "rm with -rf flag"),
-    (r"\brm\s+.*-rf\b", "rm with -rf flag"),
-    (r"\bmkfs\b", "mkfs (filesystem creation, destructive)"),
-    (r"\bdd\s+if=.*of=/dev/[a-zA-Z]+", "dd to raw device"),
-    (r"\b:(){ :|:& };:", "Fork bomb"),
-    (r"\bchmod\s+(-R\s+)?777\b", "chmod 777 (world-writable)"),
-    (r"\bchown\s+(-R\s+)?root:root\s+/", "chown root:root /"),
-    (r"\bgcc\s+.*-o\s+/", "gcc compile to root directory"),
-    (r"\bgit\s+push\s+--force\b", "git push --force"),
-    (r"\bgit\s+push\s+-f\b", "git push -f"),
-    (r"\bsudo\s+su\b", "sudo su (become root)"),
-    (r"\bsudo\s+.*>\s*/", "sudo redirect to root directory"),
-    (r"\bDROP\s+(TABLE|DATABASE)\b", "SQL DROP statement"),
-    (r"\bTRUNCATE\s+TABLE\b", "SQL TRUNCATE statement"),
-    (r"\bDELETE\s+FROM\b", "SQL DELETE FROM"),
-    (r"\bALTER\s+TABLE\s+\w+\s+DROP\b", "SQL ALTER TABLE DROP"),
-    (r"\bcurl\b.*\|.*\b(ba)?sh\b", "curl piped to shell"),
-    (r"\bwget\b.*\|.*\b(ba)?sh\b", "wget piped to shell"),
-    (r"\bcurl\b.*\|.*\bpython\b", "curl piped to python"),
-    (r"\bwget\b.*-O\s*-\s*\|.*\bpython\b", "wget piped to python"),
-    (r"\bopenssl\s+.*-nodes\b", "openssl with -nodes (unencrypted key)"),
-    (r"\bssh\s+.*-o\s+StrictHostKeyChecking=no\b", "SSH with disabled host key checking"),
-    (r"\bscp\s+.*root@", "scp to root user"),
-    (r"\biptables\s+-F\b", "iptables flush rules"),
-    (r"\biptables\s+-P\s+INPUT\s+ACCEPT\b", "iptables accept all"),
-    (r"\bdocker\s+rm\s+-f\b", "docker rm -f"),
-    (r"\bdocker\s+system\s+prune\b", "docker system prune"),
-    (r"\bdocker\s+volume\s+rm\b", "docker volume rm"),
-    (r"\bdocker\s+network\s+rm\b", "docker network rm"),
-    (r"\bdocker\s+compose\s+down\s+-v\b", "docker compose down -v"),
-    (r"\bkubectl\s+delete\s+namespace\b", "kubectl delete namespace"),
-    (r"\bkubectl\s+delete\s+deployment\b", "kubectl delete deployment"),
-    (r"\bhelm\s+uninstall\b", "helm uninstall"),
-    (r"\bterraform\s+(destroy|apply)", "Terraform destroy/apply"),
-    (r"\bansible\b.*-e\s+.*state=absent", "Ansible state=absent"),
-    (r"\bpip\s+uninstall\b", "pip uninstall"),
-    (r"\bnpm\s+uninstall\b", "npm uninstall"),
-    (r"\bapt-get\s+purge\b", "apt-get purge"),
-    (r"\byum\s+remove\b", "yum remove"),
-    (r"\bpacman\s+-R\b", "pacman -R (remove)"),
-    (r"\bnpx\s+.*@", "npx with unknown package"),
-    (r"\bpipx\s+run\b", "pipx run (arbitrary package execution)"),
-    (r"\bshred\b", "shred (secure delete)"),
-    (r"\bwiping\b", "wiping tools"),
-    (r"\bcrontab\s+-r\b", "crontab -r (remove all cron jobs)"),
-    (r"\bcrontab\s+.*>\s*/etc/cron", "crontab redirect to system"),
-    (r"\bkill\s+-9\s+-1\b", "kill -9 -1 (all processes)"),
-    (r"\buserdel\s+-r\b", "userdel -r (remove user and home)"),
-]
+# Built-in patterns come from Hermes at runtime via tools.approval_detection.
+# We do NOT bundle a static copy: that drifted from Hermes's actual list,
+# bloated plugin source, and tripped the plugin security scanner on every
+# dangerous-pattern reference. Resolved fresh each call.
+
+
+def _get_builtin_patterns() -> list[tuple[str, str]]:
+    """Return Hermes's built-in DANGEROUS_PATTERNS at runtime, minus any
+    patterns this plugin injected.
+
+    The plugin's ``register()`` appends user-defined block patterns to
+    ``DANGEROUS_PATTERNS``. If we returned the full list, the CLI's
+    ``list --builtins`` view would show those injected entries labelled
+    ``[Hermes]`` — misleading. We slice to the original length recorded
+    by ``register()`` (via :func:`patterns.get_builtins_initial_length`),
+    so only Hermes's true built-ins appear in the --builtins view.
+
+    Returns an empty list when ``tools.approval_detection`` is unavailable
+    (CLI running outside Hermes, or in unit tests). Callers must handle the
+    empty case gracefully.
+    """
+    try:
+        from tools.approval_detection import DANGEROUS_PATTERNS
+    except ImportError:
+        return []
+
+    try:
+        from .patterns import get_builtins_initial_length
+    except ImportError:
+        initial_length = 0
+    else:
+        initial_length = get_builtins_initial_length()
+
+    return list(DANGEROUS_PATTERNS)[:initial_length]
 
 
 def _format_builtins(
@@ -1917,7 +1927,7 @@ def _format_builtins(
     """Format the built-in patterns list for display."""
     lines = ["[bold cyan]BUILT-IN patterns (Hermes):[/bold cyan]"]
     shown = 0
-    for pat, desc in _BUILTIN_PATTERNS:
+    for pat, desc in _get_builtin_patterns():
         if (
             search_term
             and search_term.lower() not in desc.lower()
@@ -1962,11 +1972,12 @@ def _config_update_reminder() -> str:
 def _check_allow_shadowing_for_cli(config: dict[str, Any]) -> list[str]:
     """Check if allow patterns shadow built-in patterns, return warning messages.
 
-    CLI-safe counterpart of __init__._check_allow_shadowing() that uses the
-    static _BUILTIN_PATTERNS snapshot instead of importing tools.approval
-    (which is only available in the Hermes runtime). The overlap heuristic
-    and coverage scoping are shared via :func:`patterns.find_uncovered_allow_shadowing`
-    so the CLI and runtime cannot drift.
+    CLI-safe counterpart of __init__._check_allow_shadowing(). Resolves
+    Hermes's current DANGEROUS_PATTERNS at runtime; returns no warnings
+    when tools.approval_detection is unavailable (e.g. tests). The overlap
+    heuristic and coverage scoping are shared via
+    :func:`patterns.find_uncovered_allow_shadowing` so the CLI and runtime
+    cannot drift.
 
     Returns a list of warning strings (empty if no shadowing detected).
     """
@@ -1987,7 +1998,7 @@ def _check_allow_shadowing_for_cli(config: dict[str, Any]) -> list[str]:
             pass
 
     builtin_compiled: list[tuple[re.Pattern, str]] = []
-    for pat_str, desc in _BUILTIN_PATTERNS:
+    for pat_str, desc in _get_builtin_patterns():
         try:
             builtin_compiled.append((re.compile(pat_str, re.IGNORECASE | re.DOTALL), desc))
         except re.error:
@@ -2034,49 +2045,50 @@ def register_cli(subparser: argparse.ArgumentParser) -> None:
     # -- list --
     list_p = subs.add_parser("list", help="List custom patterns")
     list_p.add_argument(
-        "-t", "--type", dest="type",
+        "-t",
+        "--type",
+        dest="type",
         choices=["block", "allow", "deny"],
         help="Filter by pattern type",
     )
     list_p.add_argument("-g", "--group", help="Filter by group name")
     list_p.add_argument("-s", "--search", help="Search in description/pattern")
+    list_p.add_argument("--disabled", action="store_true", help="Show only disabled patterns")
+    list_p.add_argument("--enabled", action="store_true", help="Show only enabled patterns")
     list_p.add_argument(
-        "--disabled", action="store_true", help="Show only disabled patterns"
-    )
-    list_p.add_argument(
-        "--enabled", action="store_true", help="Show only enabled patterns"
-    )
-    list_p.add_argument(
-        "--builtins", action="store_true",
+        "--builtins",
+        action="store_true",
         help="Also show Hermes built-in patterns",
     )
     list_p.set_defaults(func=_handle_list)
 
     # -- test --
-    test_p = subs.add_parser(
-        "test", help="Test a command against all pattern types"
-    )
+    test_p = subs.add_parser("test", help="Test a command against all pattern types")
     test_p.add_argument("command", help="Command string to test")
     test_p.add_argument(
-        "-v", "--verbose", action="store_true",
+        "-v",
+        "--verbose",
+        action="store_true",
         help="Show matched regex patterns",
     )
     test_p.add_argument(
-        "--skip-builtins", action="store_true",
+        "--skip-builtins",
+        action="store_true",
         help="Skip built-in Hermes patterns",
     )
     test_p.set_defaults(func=_handle_test)
 
     # -- init --
-    init_p = subs.add_parser(
-        "init", help="Create a starter config file"
-    )
+    init_p = subs.add_parser("init", help="Create a starter config file")
     init_p.add_argument(
-        "--with-examples", action="store_true",
+        "--with-examples",
+        action="store_true",
         help="Include fully-enabled example patterns",
     )
     init_p.add_argument(
-        "-f", "--force", action="store_true",
+        "-f",
+        "--force",
+        action="store_true",
         help="Overwrite existing config",
     )
     init_p.set_defaults(func=_handle_init)
@@ -2084,17 +2096,22 @@ def register_cli(subparser: argparse.ArgumentParser) -> None:
     # -- enable --
     enable_p = subs.add_parser("enable", help="Enable patterns")
     enable_p.add_argument(
-        "target", nargs="?", default=None,
+        "target",
+        nargs="?",
+        default=None,
         help="Pattern index or description substring",
     )
     enable_p.add_argument(
-        "-t", "--type", dest="type",
+        "-t",
+        "--type",
+        dest="type",
         choices=["block", "allow", "deny"],
         help="Filter by pattern type",
     )
     enable_p.add_argument("-g", "--group", help="Enable all patterns in group")
     enable_p.add_argument(
-        "--dry-run", action="store_true",
+        "--dry-run",
+        action="store_true",
         help="Show what would change without saving",
     )
     enable_p.set_defaults(func=_handle_enable)
@@ -2102,31 +2119,38 @@ def register_cli(subparser: argparse.ArgumentParser) -> None:
     # -- disable --
     disable_p = subs.add_parser("disable", help="Disable patterns")
     disable_p.add_argument(
-        "target", nargs="?", default=None,
+        "target",
+        nargs="?",
+        default=None,
         help="Pattern index or description substring",
     )
     disable_p.add_argument(
-        "-t", "--type", dest="type",
+        "-t",
+        "--type",
+        dest="type",
         choices=["block", "allow", "deny"],
         help="Filter by pattern type",
     )
     disable_p.add_argument("-g", "--group", help="Disable all patterns in group")
     disable_p.add_argument(
-        "--dry-run", action="store_true",
+        "--dry-run",
+        action="store_true",
         help="Show what would change without saving",
     )
     disable_p.set_defaults(func=_handle_disable)
 
     # -- validate --
-    validate_p = subs.add_parser(
-        "validate", help="Validate config syntax and regexes"
-    )
+    validate_p = subs.add_parser("validate", help="Validate config syntax and regexes")
     validate_p.add_argument(
-        "path", nargs="?", default=None,
+        "path",
+        nargs="?",
+        default=None,
         help="Config path (default: auto-detect)",
     )
     validate_p.add_argument(
-        "-q", "--quiet", action="store_true",
+        "-q",
+        "--quiet",
+        action="store_true",
         help="Exit code only, no output",
     )
     validate_p.set_defaults(func=_handle_validate)
@@ -2136,24 +2160,29 @@ def register_cli(subparser: argparse.ArgumentParser) -> None:
     info_p.set_defaults(func=_handle_info)
 
     # -- logs --
-    logs_p = subs.add_parser(
-        "logs", help="Show plugin log entries"
-    )
+    logs_p = subs.add_parser("logs", help="Show plugin log entries")
     logs_p.add_argument(
-        "-l", "--level",
+        "-l",
+        "--level",
         choices=["DEBUG", "INFO", "WARNING", "ERROR"],
         help="Filter by log level",
     )
     logs_p.add_argument(
-        "-n", "--limit", type=int, default=100,
+        "-n",
+        "--limit",
+        type=int,
+        default=100,
         help="Max entries to show (default: 100)",
     )
     logs_p.add_argument(
-        "--since", default=None,
+        "--since",
+        default=None,
         help="Show entries since date (YYYY-MM-DD)",
     )
     logs_p.add_argument(
-        "-f", "--follow", action="store_true",
+        "-f",
+        "--follow",
+        action="store_true",
         help="Follow log file (tail -f)",
     )
     logs_p.set_defaults(func=_handle_logs)
@@ -2161,65 +2190,83 @@ def register_cli(subparser: argparse.ArgumentParser) -> None:
     # -- add --
     add_p = subs.add_parser("add", help="Add a custom pattern")
     add_p.add_argument(
-        "-t", "--type", dest="type",
+        "-t",
+        "--type",
+        dest="type",
         choices=["block", "allow", "deny"],
         help="Pattern type (required in non-interactive mode)",
     )
     add_p.add_argument(
-        "-p", "--pattern", default=None,
+        "-p",
+        "--pattern",
+        default=None,
         help="Regex pattern (required in non-interactive mode)",
     )
     add_p.add_argument(
-        "-d", "--description", default=None,
+        "-d",
+        "--description",
+        default=None,
         help="Description (required in non-interactive mode)",
     )
     add_p.add_argument("-g", "--group", default=None, help="Group name")
     add_p.add_argument(
-        "--examples", nargs="+", default=None,
+        "--examples",
+        nargs="+",
+        default=None,
         help="Example commands that match this pattern",
     )
     add_p.add_argument(
-        "--disabled", action="store_true",
+        "--disabled",
+        action="store_true",
         help="Add pattern as disabled (default: enabled)",
     )
     add_p.add_argument(
-        "--protected", action="store_true",
+        "--protected",
+        action="store_true",
         help="Protect pattern from enable/disable/remove",
     )
     add_p.add_argument(
-        "--dry-run", action="store_true",
+        "--dry-run",
+        action="store_true",
         help="Show what would be added without saving",
     )
     add_p.add_argument(
-        "--glob", default=None,
+        "--glob",
+        default=None,
         help="Glob-style pattern (e.g. 'echo hello'). Converted to regex. "
-             "Mutually exclusive with --pattern.",
+        "Mutually exclusive with --pattern.",
     )
     add_p.add_argument(
-        "--target", default=None,
+        "--target",
+        default=None,
         help="Write to a specific .yaml file in the config directory "
-             "(requires directory mode; file must have .yaml extension)",
+        "(requires directory mode; file must have .yaml extension)",
     )
     add_p.set_defaults(func=_handle_add)
 
     # -- remove --
     remove_p = subs.add_parser("remove", help="Remove a custom pattern")
     remove_p.add_argument(
-        "target", nargs="?", default=None,
+        "target",
+        nargs="?",
+        default=None,
         help="Pattern index or description substring",
     )
     remove_p.add_argument(
-        "-t", "--type", dest="type",
+        "-t",
+        "--type",
+        dest="type",
         choices=["block", "allow", "deny"],
         help="Filter by pattern type",
     )
     remove_p.add_argument(
-        "--dry-run", action="store_true",
+        "--dry-run",
+        action="store_true",
         help="Show what would be removed without saving",
     )
     remove_p.add_argument(
-        "--force", action="store_true",
+        "--force",
+        action="store_true",
         help="Skip confirmation prompt",
     )
     remove_p.set_defaults(func=_handle_remove)
-
