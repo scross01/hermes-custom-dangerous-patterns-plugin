@@ -686,7 +686,7 @@ The `_config_cache` freeze means mid-session edits are ignored, but changes take
 
 ### User-level hardening options (optional, not default)
 
-- Run the agent and Hermes under **separate OS users** so the agent cannot write to `~/.hermes/custom-dangerous-patterns.yaml` or `~/.hermes/config.yaml`
+- Run the agent and Hermes under **different OS accounts** so the agent cannot write to `~/.hermes/custom-dangerous-patterns.yaml` or `~/.hermes/config.yaml`
 - Set config file permissions to `0444` (read-only) for the agent's user
 - Mount the config directory read-only in containerized setups
 - Use `command_allowlist` only for patterns the user personally approved
