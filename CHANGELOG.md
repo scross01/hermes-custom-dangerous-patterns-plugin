@@ -1,5 +1,8 @@
 # Change Log
 
+## 0.3.5
+
+- Fix import location of Hermes default dangerous patterns. #2
 
 ## 0.3.4
 
