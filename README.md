@@ -80,7 +80,7 @@ hermes custom-dangerous-patterns init --with-examples
 
 This creates `~/.hermes/custom-dangerous-patterns/` (a directory) with:
 - `00-test.yaml` — safe `[TEST]` patterns (all disabled)
-- `01-examples.yaml` — fully-enabled example patterns (only with `--with-examples`)
+- All bundled example files copied individually (`01-cloud.yaml`, `02-infra.yaml`, `03-tools.yaml`, `04-package-managers.yaml`) — fully-enabled example patterns (only with `--with-examples`)
 
 Without `--with-examples`, creates a minimal config directory with safe test patterns (all disabled).
 
@@ -138,7 +138,9 @@ write delta entries to `99-custom.yaml` — user-created files are never
 modified.
 
 Two exceptions:
-- **`remove`** deletes entries directly from source YAML files
+- **`remove`** behavior depends on config mode:
+  - **Single-file mode:** edits the source YAML file directly using `remove_entry_from_file()`, which scans all YAML files and deletes matching pattern entries at the YAML level — no `disabled: true` remnant is written.
+  - **Directory mode:** removes the entry from the in-memory config and `save_config()` writes `enabled: false` to `99-custom.yaml` (delta). Source files are not modified.
 - **`add --target <filename>`** writes to the specified file
 
 **Single file (fallback):**
@@ -586,8 +588,14 @@ hermes custom-dangerous-patterns remove 7 --dry-run
 | `--dry-run` | Preview without deleting |
 
 Unlike `enable`/`disable` (which write delta entries to `99-custom.yaml`),
-**`remove` truly deletes the pattern** from the source YAML file — the
-lines are removed, no remnant written.
+**`remove`** deletes the pattern from the active config:
+
+- **Single-file mode:** edits the source YAML file directly using
+  `remove_entry_from_file()`. The entry is deleted from the file — no
+  `disabled: true` remnant is written.
+- **Directory mode:** removes the entry from the in-memory config and
+  `save_config()` writes `enabled: false` to `99-custom.yaml` (delta).
+  User-created source files are not modified.
 
 Protected patterns cannot be removed via CLI; edit the config file
 directly to remove them.
@@ -783,8 +791,11 @@ hermes-custom-dangerous-patterns-plugin/
 ├── logs.py              # Log extraction and filtering for hermes custom-dangerous-patterns logs
 ├── AGENTS.md            # Developer guide: gotchas, testing safety, CLI architecture
 ├── examples/
-│   ├── 01-examples.yaml                 # Example config with cloud/deployment patterns
-│   └── 00-test.yaml                     # Safe, disabled-by-default test patterns
+│   ├── 00-test.yaml                     # Safe, disabled-by-default test patterns
+│   ├── 01-cloud.yaml                    # Cloud CLI tools (aws, az, gcloud, vultr)
+│   ├── 02-infra.yaml                    # Infrastructure as Code (opentofu, docker, podman)
+│   ├── 03-tools.yaml                    # Backup, sync, network scanning, secrets
+│   └── 04-package-managers.yaml         # Package managers (brew, npm, pip, cargo, uv)
 ├── tests/
 │   ├── conftest.py       # Test fixtures, mocks, helpers
 │   ├── test_config.py    # Config loading, validation, integrity tests

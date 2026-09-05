@@ -100,7 +100,9 @@ test_p.set_defaults(func=_handle_test)
 - Write commands (`enable`, `disable`, `add`, `remove`) modify the YAML config on disk and remind the user to restart Hermes.
 - **Directory mode delta writes.** When the config path is a directory, most write commands (`enable`, `disable`, `add` without `--target`) never touch user-created files. Instead, `save_config()` computes a delta and writes only changed entries to `99-custom.yaml`.
 - **`add --target <filename>`** writes directly to the specified file (skips `save_config` delta). The file must have a `.yaml` extension; path separators are not allowed.
-- **`remove` always edits source files directly.** Unlike other write commands, `remove` uses `remove_entry_from_file()` to scan all YAML files and delete matching pattern entries at the YAML level. No `disabled: true` remnant is written.
+- **`remove`** behavior depends on config mode:
+  - **Single-file mode:** edits the source YAML file directly using `remove_entry_from_file()`. The entry is deleted from the file — no `disabled: true` remnant is written.
+  - **Directory mode:** removes the entry from the in-memory config and `save_config()` writes `enabled: false` to `99-custom.yaml` (delta). Source files are not modified.
 - CLI commands are invoked by Hermes's plugin CLI system but still use the same relative import convention as the rest of the plugin (`from .config import ...`, `from .patterns import ...`).
 
 > **User-facing CLI behavior:** See [README.md — CLI Reference](./README.md#cli-reference) for all commands, flags, and usage examples.
