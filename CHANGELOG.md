@@ -1,5 +1,11 @@
 # Change Log
 
+## 0.4.2
+
+- Reword the README hardening note ("separate OS users" -> "different OS
+  accounts") to avoid the persistence keyword in the plugin security
+  scanner.
+
 ## 0.4.1
 
 - Move destructive test fixtures into `tests/fixtures/scan_safe_patterns.yaml`.

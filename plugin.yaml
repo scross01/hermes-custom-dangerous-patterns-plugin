@@ -1,5 +1,5 @@
 name: custom-dangerous-patterns
-version: "0.4.1"
+version: "0.4.2"
 manifest_version: 2
 description: >-
   Add custom dangerous command patterns to Hermes's built-in approval
