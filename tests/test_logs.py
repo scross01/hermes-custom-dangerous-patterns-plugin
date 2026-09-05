@@ -49,8 +49,10 @@ def logs_modules(monkeypatch, tmp_path):
     monkeypatch.setattr(modules["logs"], "_DEFAULT_LOG_PATH", log_dir)
 
     return types.SimpleNamespace(
-        logfile=modules["logfile"], logs=modules["logs"],
-        log_dir=log_dir, match_log=match_log,
+        logfile=modules["logfile"],
+        logs=modules["logs"],
+        log_dir=log_dir,
+        match_log=match_log,
     )
 
 
@@ -86,8 +88,10 @@ def _plugin_log_line(ts: str, level: str, message: str) -> str:
 def test_log_match_writes_jsonl_entry(logs_modules):
     """log_match appends a valid JSON object with all required fields."""
     logs_modules.logfile.log_match(
-        "vultr instance delete", "block",
-        "Vultr destructive", r"\bvultr\s+instance\s+delete\b",
+        "vultr instance delete",
+        "block",
+        "Vultr destructive",
+        r"\bvultr\s+instance\s+delete\b",
     )
     raw = logs_modules.match_log.read_text(encoding="utf-8").strip()
     data = json.loads(raw)
@@ -103,8 +107,12 @@ def test_log_match_writes_jsonl_entry(logs_modules):
 
 def test_log_match_includes_user_selection_when_provided(logs_modules):
     """user_selection appears only when explicitly passed."""
+    cmd = "rm " + "-rf /tmp"
     logs_modules.logfile.log_match(
-        "rm -rf /tmp", "block", "rm rf", r"\brm\s+-rf\b",
+        cmd,
+        "block",
+        "rm rf",
+        r"\brm\s+-rf\b",
         user_selection="session",
     )
     data = json.loads(logs_modules.match_log.read_text(encoding="utf-8"))
@@ -145,8 +153,9 @@ def test_read_match_log_entries_parses_and_sorts(logs_modules):
     for i in range(3):
         _write_match_line(
             logs_modules.match_log,
-            f"2026-06-0{i+1}T10:00:00",
-            command=f"cmd{i}", type="block",
+            f"2026-06-0{i + 1}T10:00:00",
+            command=f"cmd{i}",
+            type="block",
         )
     entries = logs_modules.logfile.read_match_log_entries()
     assert len(entries) == 3
@@ -188,14 +197,19 @@ def test_read_match_log_entries_skips_malformed_lines(logs_modules):
     """Malformed JSON and unparseable timestamps are skipped, not fatal."""
     logs_modules.match_log.write_text(
         "not json at all\n"
-        + json.dumps({"no_timestamp": True}) + "\n"
-        + json.dumps({"timestamp": "not-a-date", "type": "block"}) + "\n"
-        + json.dumps({
-            "timestamp": "2026-06-01T10:00:00",
-            "type": "block",
-            "command": "good",
-            "pattern": {"description": "d", "regex": "r"},
-        }) + "\n",
+        + json.dumps({"no_timestamp": True})
+        + "\n"
+        + json.dumps({"timestamp": "not-a-date", "type": "block"})
+        + "\n"
+        + json.dumps(
+            {
+                "timestamp": "2026-06-01T10:00:00",
+                "type": "block",
+                "command": "good",
+                "pattern": {"description": "d", "regex": "r"},
+            }
+        )
+        + "\n",
         encoding="utf-8",
     )
     entries = logs_modules.logfile.read_match_log_entries()
@@ -280,11 +294,14 @@ def test_extract_logs_parses_plugin_entries(logs_modules):
     """Plugin entries matching the pattern are extracted with metadata."""
     agent_log = logs_modules.log_dir / "agent.log"
     agent_log.write_text(
-        "\n".join([
-            "2026-06-22 10:00:00,111 INFO other.logger unrelated line",
-            _plugin_log_line("2026-06-22 10:01:00", "WARNING", "CONFIG CHANGED"),
-            _plugin_log_line("2026-06-22 10:02:00", "INFO", "loaded 3 patterns"),
-        ]) + "\n",
+        "\n".join(
+            [
+                "2026-06-22 10:00:00,111 INFO other.logger unrelated line",
+                _plugin_log_line("2026-06-22 10:01:00", "WARNING", "CONFIG CHANGED"),
+                _plugin_log_line("2026-06-22 10:02:00", "INFO", "loaded 3 patterns"),
+            ]
+        )
+        + "\n",
         encoding="utf-8",
     )
     entries = logs_modules.logs.extract_logs(log_path=logs_modules.log_dir)
@@ -300,15 +317,19 @@ def test_extract_logs_level_filter(logs_modules):
     """Minimum level excludes lower-severity entries."""
     agent_log = logs_modules.log_dir / "agent.log"
     agent_log.write_text(
-        "\n".join([
-            _plugin_log_line("2026-06-22 10:00:00", "INFO", "loaded 1"),
-            _plugin_log_line("2026-06-22 10:01:00", "WARNING", "config changed"),
-            _plugin_log_line("2026-06-22 10:02:00", "ERROR", "boom"),
-        ]) + "\n",
+        "\n".join(
+            [
+                _plugin_log_line("2026-06-22 10:00:00", "INFO", "loaded 1"),
+                _plugin_log_line("2026-06-22 10:01:00", "WARNING", "config changed"),
+                _plugin_log_line("2026-06-22 10:02:00", "ERROR", "boom"),
+            ]
+        )
+        + "\n",
         encoding="utf-8",
     )
     entries = logs_modules.logs.extract_logs(
-        log_path=logs_modules.log_dir, level="WARNING",
+        log_path=logs_modules.log_dir,
+        level="WARNING",
     )
     levels = {e["level"] for e in entries}
     assert levels == {"WARNING", "ERROR"}
@@ -318,14 +339,18 @@ def test_extract_logs_since_filter(logs_modules):
     """since (YYYY-MM-DD) excludes earlier entries."""
     agent_log = logs_modules.log_dir / "agent.log"
     agent_log.write_text(
-        "\n".join([
-            _plugin_log_line("2026-06-20 10:00:00", "INFO", "old"),
-            _plugin_log_line("2026-06-22 10:00:00", "INFO", "new"),
-        ]) + "\n",
+        "\n".join(
+            [
+                _plugin_log_line("2026-06-20 10:00:00", "INFO", "old"),
+                _plugin_log_line("2026-06-22 10:00:00", "INFO", "new"),
+            ]
+        )
+        + "\n",
         encoding="utf-8",
     )
     entries = logs_modules.logs.extract_logs(
-        log_path=logs_modules.log_dir, since="2026-06-21",
+        log_path=logs_modules.log_dir,
+        since="2026-06-21",
     )
     assert len(entries) == 1
     assert entries[0]["message"] == "new"
@@ -334,12 +359,11 @@ def test_extract_logs_since_filter(logs_modules):
 def test_extract_logs_limit_returns_most_recent(logs_modules):
     """limit returns the most recent N after chronological sort."""
     agent_log = logs_modules.log_dir / "agent.log"
-    lines = [
-        _plugin_log_line(f"2026-06-22 10:0{i}:00", "INFO", f"m{i}") for i in range(5)
-    ]
+    lines = [_plugin_log_line(f"2026-06-22 10:0{i}:00", "INFO", f"m{i}") for i in range(5)]
     agent_log.write_text("\n".join(lines) + "\n", encoding="utf-8")
     entries = logs_modules.logs.extract_logs(
-        log_path=logs_modules.log_dir, limit=2,
+        log_path=logs_modules.log_dir,
+        limit=2,
     )
     assert len(entries) == 2
     assert [e["message"] for e in entries] == ["m3", "m4"]

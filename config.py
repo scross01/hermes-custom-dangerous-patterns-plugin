@@ -175,7 +175,7 @@ def _load_single_yaml(path: Path) -> dict[str, Any] | None:
     except ImportError:
         logger.warning(
             "custom-dangerous-patterns: ruamel.yaml not installed -- cannot load config. "
-            "Install with: pip install ruamel.yaml"
+            "Install the ruamel.yaml package to enable config support."
         )
         return None
 

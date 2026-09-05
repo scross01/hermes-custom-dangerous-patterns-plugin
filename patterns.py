@@ -19,6 +19,28 @@ _block_compiled: list[tuple[re.Pattern, str]] = []
 _allow_compiled: list[tuple[re.Pattern, str]] = []
 _deny_compiled: list[tuple[re.Pattern, str]] = []
 
+# Length of Hermes's DANGEROUS_PATTERNS list at the moment the plugin first
+# injected its block patterns. Recorded so the CLI's --builtins view can
+# slice off the plugin's own entries and only show Hermes's true built-ins
+# (labelled correctly as [Hermes] rather than [Plugin]). 0 = plugin never
+# injected (or the CLI is running outside Hermes).
+_builtins_initial_length: int = 0
+
+
+def set_builtins_initial_length(n: int) -> None:
+    """Record DANGEROUS_PATTERNS length before the plugin's first inject.
+
+    Called once by register() right before appending to DANGEROUS_PATTERNS.
+    The CLI reads this to slice off plugin-injected entries from --builtins.
+    """
+    global _builtins_initial_length
+    _builtins_initial_length = n
+
+
+def get_builtins_initial_length() -> int:
+    """Return the recorded length (0 if never injected)."""
+    return _builtins_initial_length
+
 
 def compile_block_patterns(raw_patterns: list[dict[str, str]]) -> list[tuple[re.Pattern, str]]:
     """Compile block patterns from config into (compiled_regex, description).
@@ -214,7 +236,7 @@ def glob_to_regex(glob_str: str) -> str:
             if token[scan] == "{":
                 end = token.find("}", scan + 1)
                 if end != -1:
-                    inner = token[scan + 1:end]
+                    inner = token[scan + 1 : end]
                     if inner:
                         alts = [a for a in inner.split(",") if a]
                         if len(alts) > 1:
@@ -234,14 +256,12 @@ def glob_to_regex(glob_str: str) -> str:
         if brace_start is not None:
             # Brace expansion: prefix + each alt is glob-processed as a unit
             prefix = token[:brace_start]
-            inner = token[brace_start + 1:brace_end]
+            inner = token[brace_start + 1 : brace_end]
             alts = [a for a in inner.split(",") if a]
-            alternatives = [
-                _process_token(prefix + alt) for alt in alts
-            ]
+            alternatives = [_process_token(prefix + alt) for alt in alts]
             processed = "|".join(alternatives)
             # Suffix (chars after closing })
-            suffix = token[brace_end + 1:]
+            suffix = token[brace_end + 1 :]
             if suffix:
                 return "(?:" + processed + ")" + _process_token(suffix)
             return "(?:" + processed + ")"
@@ -295,7 +315,7 @@ def glob_to_regex(glob_str: str) -> str:
         # Insert (?!/) after the first token so the command name matches
         # when followed by whitespace but NOT by '/' — prevents matching
         # directory components like /opt/aws/command (vs /opt/bin/aws --help).
-        regex_body = first_re + r"(?!/)" + regex_body[len(first_re):]
+        regex_body = first_re + r"(?!/)" + regex_body[len(first_re) :]
         regex_body = r"\b" + regex_body
     if tokens and tokens[-1] and tokens[-1][-1].isalnum():
         regex_body = regex_body + r"\b"

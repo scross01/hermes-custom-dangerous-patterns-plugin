@@ -292,7 +292,9 @@ def test_cmd_test_no_patterns(monkeypatch, cli_module, tmp_path):
         sys.modules["hermes_plugins.config"],
         "load_config",
         lambda force=False, integrity_check=True: {
-            "patterns": [], "allow_patterns": [], "deny_patterns": []
+            "patterns": [],
+            "allow_patterns": [],
+            "deny_patterns": [],
         },
     )
     monkeypatch.setattr(
@@ -327,7 +329,9 @@ def test_cmd_test_deny_match(monkeypatch, cli_module, tmp_path):
         sys.modules["hermes_plugins.config"],
         "load_config",
         lambda force=False, integrity_check=True: {
-            "patterns": [], "allow_patterns": [], "deny_patterns": []
+            "patterns": [],
+            "allow_patterns": [],
+            "deny_patterns": [],
         },
     )
     monkeypatch.setattr(
@@ -363,7 +367,9 @@ def test_cmd_test_allow_match(monkeypatch, cli_module, tmp_path):
         sys.modules["hermes_plugins.config"],
         "load_config",
         lambda force=False, integrity_check=True: {
-            "patterns": [], "allow_patterns": [], "deny_patterns": []
+            "patterns": [],
+            "allow_patterns": [],
+            "deny_patterns": [],
         },
     )
     monkeypatch.setattr(
@@ -399,7 +405,9 @@ def test_cmd_test_approval_prompt(monkeypatch, cli_module, tmp_path):
         sys.modules["hermes_plugins.config"],
         "load_config",
         lambda force=False, integrity_check=True: {
-            "patterns": [], "allow_patterns": [], "deny_patterns": []
+            "patterns": [],
+            "allow_patterns": [],
+            "deny_patterns": [],
         },
     )
     monkeypatch.setattr(
@@ -419,6 +427,7 @@ def test_cmd_test_approval_prompt(monkeypatch, cli_module, tmp_path):
     )
 
     import re as _re
+
     compiled_re = _re.compile(r"\bvultr\b", _re.IGNORECASE | _re.DOTALL)
     monkeypatch.setattr(
         sys.modules["hermes_plugins.patterns"],
@@ -438,7 +447,9 @@ def test_cmd_test_skip_builtins(monkeypatch, cli_module, tmp_path):
         sys.modules["hermes_plugins.config"],
         "load_config",
         lambda force=False, integrity_check=True: {
-            "patterns": [], "allow_patterns": [], "deny_patterns": []
+            "patterns": [],
+            "allow_patterns": [],
+            "deny_patterns": [],
         },
     )
     monkeypatch.setattr(
@@ -579,7 +590,7 @@ def test_cmd_validate_glob_mismatch_warning(monkeypatch, cli_module, tmp_path):
     # Check that generated and stored patterns appear (use raw strings
     # so \\b and \\s are literal backslash sequences, not escape sequences)
     assert r"\becho(?!/)\s+hello\b" in output  # generated from glob "echo hello"
-    assert r"\becho\s+world\b" in output   # stored pattern
+    assert r"\becho\s+world\b" in output  # stored pattern
 
 
 def test_cmd_validate_glob_match_no_warning(monkeypatch, cli_module, tmp_path):
@@ -680,19 +691,73 @@ def test_config_update_reminder(cli_module):
     assert "Hermes" in reminder
 
 
-def test_format_builtins_smoke(cli_module):
+def _stub_builtins():
+    """Fallback built-in list for tests (Hermes runtime not available)."""
+    return [
+        (r"\bdocker\s+rm\s+-f\b", "docker rm -f (force remove container)"),
+        (r"\bdocker\s+system\s+prune\b", "docker system prune (clean all)"),
+        (r"\brm\s+.*-rf\b", "rm with -rf flag"),
+    ]
+
+
+def test_format_builtins_smoke(cli_module, monkeypatch):
     """_format_builtins returns a list with header."""
+    monkeypatch.setattr(cli_module, "_get_builtin_patterns", _stub_builtins)
     lines = cli_module._format_builtins()
     assert len(lines) > 1
     assert "BUILT-IN patterns" in lines[0]
 
 
-def test_format_builtins_with_search(cli_module):
+def test_format_builtins_with_search(cli_module, monkeypatch):
     """_format_builtins with search filters results."""
+    monkeypatch.setattr(cli_module, "_get_builtin_patterns", _stub_builtins)
     lines_all = cli_module._format_builtins()
     lines_filtered = cli_module._format_builtins(search_term="docker")
     assert len(lines_filtered) < len(lines_all)
     assert any("docker" in line.lower() for line in lines_filtered)
+
+
+def test_get_builtin_patterns_slices_off_injected(cli_module, monkeypatch):
+    """_get_builtin_patterns() hides plugin-injected patterns from --builtins.
+
+    register() appends user-defined block patterns to DANGEROUS_PATTERNS at
+    startup. The CLI's --builtins view must not show them labelled [Hermes].
+    The production code path (no monkeypatch) must slice the list to the
+    pre-injection length recorded via patterns.set_builtins_initial_length().
+    """
+    import sys
+    import types
+
+    real_builtins = [
+        (r"\brm\s+.*-rf\b", "rm with -rf flag"),
+        (r"\bmkfs\b", "mkfs (filesystem creation, destructive)"),
+    ]
+    injected = [
+        (r"\bvultr\b", "user vultr block"),
+        (r"\bgcloud\b", "user gcloud block"),
+    ]
+
+    # Build a minimal `tools.approval_detection` package so the production
+    # `from tools.approval_detection import DANGEROUS_PATTERNS` resolves.
+    tools_pkg = types.ModuleType("tools")
+    detection = types.ModuleType("tools.approval_detection")
+    detection.DANGEROUS_PATTERNS = list(real_builtins) + list(injected)
+    tools_pkg.approval_detection = detection
+    monkeypatch.setitem(sys.modules, "tools", tools_pkg)
+    monkeypatch.setitem(sys.modules, "tools.approval_detection", detection)
+
+    # The cli_module is loaded as hermes_plugins.cli, so `from .patterns`
+    # inside it resolves to hermes_plugins.patterns. We must set the sentinel
+    # on that exact module instance, not on a top-level `patterns` import.
+    import hermes_plugins.patterns as _plugin_patterns
+
+    _plugin_patterns.set_builtins_initial_length(len(real_builtins))
+
+    result = cli_module._get_builtin_patterns()
+    assert result == real_builtins, (
+        f"expected only the {len(real_builtins)} Hermes built-ins; "
+        f"got {len(result)} entries (the injected ones leaked through)"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -700,8 +765,9 @@ def test_format_builtins_with_search(cli_module):
 # ---------------------------------------------------------------------------
 
 
-def test_add_allow_pattern_shadowing_warning(cli_module):
+def test_add_allow_pattern_shadowing_warning(cli_module, monkeypatch):
     """Broad allow pattern that shadows built-ins triggers warning."""
+    monkeypatch.setattr(cli_module, "_get_builtin_patterns", _stub_builtins)
     config = {
         "patterns": [],
         "allow_patterns": [
@@ -715,8 +781,9 @@ def test_add_allow_pattern_shadowing_warning(cli_module):
     assert any("docker" in w.lower() for w in warnings)
 
 
-def test_add_block_pattern_no_shadowing_warning(cli_module):
+def test_add_block_pattern_no_shadowing_warning(cli_module, monkeypatch):
     """Block pattern produces no shadowing warnings."""
+    monkeypatch.setattr(cli_module, "_get_builtin_patterns", _stub_builtins)
     config = {
         "patterns": [
             {"pattern": r"\bvultr\b", "description": "Vultr", "enabled": True},
@@ -728,8 +795,9 @@ def test_add_block_pattern_no_shadowing_warning(cli_module):
     assert len(warnings) == 0
 
 
-def test_add_allow_pattern_no_shadowing(cli_module):
+def test_add_allow_pattern_no_shadowing(cli_module, monkeypatch):
     """Narrow allow pattern that doesn't shadow built-ins produces no warnings."""
+    monkeypatch.setattr(cli_module, "_get_builtin_patterns", _stub_builtins)
     config = {
         "patterns": [],
         "allow_patterns": [
@@ -741,7 +809,7 @@ def test_add_allow_pattern_no_shadowing(cli_module):
     assert len(warnings) == 0
 
 
-def test_allow_shadowing_not_suppressed_by_unrelated_block(cli_module):
+def test_allow_shadowing_not_suppressed_by_unrelated_block(cli_module, monkeypatch):
     """A block covering a *different* built-in must not suppress the warning.
 
     Regression: the CLI coverage check previously flipped ``covered_by_block``
@@ -751,6 +819,7 @@ def test_allow_shadowing_not_suppressed_by_unrelated_block(cli_module):
     shadows docker built-ins, while the block only covers the ``rm -rf`` /
     ``dd`` built-ins. The shadowing must still be reported.
     """
+    monkeypatch.setattr(cli_module, "_get_builtin_patterns", _stub_builtins)
     config = {
         "patterns": [
             {
@@ -765,19 +834,18 @@ def test_allow_shadowing_not_suppressed_by_unrelated_block(cli_module):
         "deny_patterns": [],
     }
     warnings = cli_module._check_allow_shadowing_for_cli(config)
-    assert len(warnings) > 0, (
-        "shadowing warning was suppressed by an unrelated block pattern"
-    )
+    assert len(warnings) > 0, "shadowing warning was suppressed by an unrelated block pattern"
     assert any("docker" in w.lower() for w in warnings)
 
 
-def test_allow_shadowing_suppressed_when_block_covers_same_builtins(cli_module):
+def test_allow_shadowing_suppressed_when_block_covers_same_builtins(cli_module, monkeypatch):
     """A block that covers the same built-ins DOES suppress the warning.
 
     Positive control for the coverage-scoping fix: an allow for
     ``\bdocker\b`` plus a block for ``\bdocker\b`` (which overlaps the same
     docker built-ins) is treated as intentionally scoped — no warning.
     """
+    monkeypatch.setattr(cli_module, "_get_builtin_patterns", _stub_builtins)
     config = {
         "patterns": [
             {"pattern": r"\bdocker\b", "description": "docker block", "enabled": True},
@@ -802,11 +870,13 @@ def _write_hash_file(config_path, config_hash):
 
     hash_path = config_path.parent / ".custom-patterns-hash"
     hash_path.write_text(
-        json.dumps({
-            "config_hash": config_hash,
-            "pattern_counts": {"patterns": 0, "allow_patterns": 0, "deny_patterns": 0},
-            "protected": {},
-        }),
+        json.dumps(
+            {
+                "config_hash": config_hash,
+                "pattern_counts": {"patterns": 0, "allow_patterns": 0, "deny_patterns": 0},
+                "protected": {},
+            }
+        ),
         encoding="utf-8",
     )
     return hash_path
@@ -833,8 +903,9 @@ def _patch_config_path(monkeypatch, config_path):
 def test_cmd_info_integrity_matches_single_file(monkeypatch, cli_module, tmp_path):
     """Single-file config with a matching hash reports 'hash matches'."""
     config_path = tmp_path / "custom-dangerous-patterns.yaml"
-    config_path.write_text("patterns: []\nallow_patterns: []\ndeny_patterns: []\n",
-                           encoding="utf-8")
+    config_path.write_text(
+        "patterns: []\nallow_patterns: []\ndeny_patterns: []\n", encoding="utf-8"
+    )
     _write_hash_file(config_path, _config_raw_hash(config_path))
     _patch_config_path(monkeypatch, config_path)
 
@@ -847,8 +918,9 @@ def test_cmd_info_integrity_matches_single_file(monkeypatch, cli_module, tmp_pat
 def test_cmd_info_integrity_changed_single_file(monkeypatch, cli_module, tmp_path):
     """Single-file config with a stale hash reports 'hash changed'."""
     config_path = tmp_path / "custom-dangerous-patterns.yaml"
-    config_path.write_text("patterns: []\nallow_patterns: []\ndeny_patterns: []\n",
-                           encoding="utf-8")
+    config_path.write_text(
+        "patterns: []\nallow_patterns: []\ndeny_patterns: []\n", encoding="utf-8"
+    )
     _write_hash_file(config_path, "0" * 64)  # wrong hash
     _patch_config_path(monkeypatch, config_path)
 

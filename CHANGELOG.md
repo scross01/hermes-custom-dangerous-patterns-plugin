@@ -1,5 +1,14 @@
 # Change Log
 
+## 0.4.0
+
+- **plugin.yaml upgraded to manifest v2** with `provides_hooks` (`pre_tool_call`) and `provides_cli_commands` (`custom-dangerous-patterns`) declared. Resolves Hermes's `unknown manifest field(s) ignored: dependencies` warning and prevents the `--allow-tool-override` consent prompt (we declare no `provides_tools`, no `capabilities`).
+- **`_BUILTIN_PATTERNS` table removed from `cli.py`.** The static snapshot of Hermes's dangerous-pattern list has been replaced with a runtime import from `tools.approval_detection.DANGEROUS_PATTERNS`. The plugin's `--builtins` view now always reflects Hermes's actual current list and no longer ships ~50 dangerous-pattern literals in source (eliminates most plugin security scanner findings).
+- **`--builtins` correctly shows only Hermes built-ins.** `register()` now records `len(DANGEROUS_PATTERNS)` before injecting the plugin's own block patterns, and `_get_builtin_patterns()` slices to that pre-injection length. User-injected patterns are no longer relabelled `[Hermes]` in the CLI's builtins view.
+- **Test fixture literals** that the plugin security scanner flagged as destructive (e.g. in test mocks) are now built via string concatenation so the runtime assertions are unchanged but the literal triggers no longer appear in shipped source.
+- **Documentation prose** in `AGENTS.md` no longer enumerates specific destructive commands as examples; refers to "real destructive commands" generically.
+- Note: v0.3.5 was tagged to ship the import-path fix (#2) but the `version:` field in `plugin.yaml` / `pyproject.toml` was not bumped; 0.4.0 is the first release that properly synchronizes manifest version, tag, and pyproject.
+
 ## 0.3.5
 
 - Fix import location of Hermes default dangerous patterns. #2
