@@ -1,0 +1,57 @@
+# Belt-and-suspenders explicit blocks for the most catastrophic operations.
+deny_patterns:
+  # --- EXPLICIT FORCE-PUSH VARIANTS ---
+  - description: '[GIT_WRITE] Deny git push --force'
+    enabled: true
+    group: GIT_WRITE
+    pattern: '\bgit\b(?:\s+(?:--?[a-zA-Z0-9_-]+(?:=[^\s]+)?(?:\s+[^-\s][^\s]*)?))*\s+push\b[^\n]*(?:--force|--force-with-lease|-f\b)'
+  
+  - description: '[GIT_WRITE] Deny git push --mirror'
+    enabled: true
+    group: GIT_WRITE
+    pattern: '\bgit\b(?:\s+(?:--?[a-zA-Z0-9_-]+(?:=[^\s]+)?(?:\s+[^-\s][^\s]*)?))*\s+push\b[^\n]*--mirror\b'
+  
+  - description: '[GIT_WRITE] Deny git push --delete (remote branch deletion)'
+    enabled: true
+    group: GIT_WRITE
+    pattern: '\bgit\b(?:\s+(?:--?[a-zA-Z0-9_-]+(?:=[^\s]+)?(?:\s+[^-\s][^\s]*)?))*\s+push\b[^\n]*(?:--delete|-d)\b'
+  
+  - description: '[GIT_WRITE] Deny git push to colon-ref syntax'
+    enabled: true
+    group: GIT_WRITE
+    pattern: '\bgit\b(?:\s+(?:--?[a-zA-Z0-9_-]+(?:=[^\s]+)?(?:\s+[^-\s][^\s]*)?))*\s+push\b[^\n]*\s+[^\s]*:[^\s]*\b'
+  
+  # --- HARD RESET ---
+  - description: '[GIT_WRITE] Deny git reset --hard'
+    enabled: true
+    group: GIT_WRITE
+    pattern: '\bgit\b(?:\s+(?:--?[a-zA-Z0-9_-]+(?:=[^\s]+)?(?:\s+[^-\s][^\s]*)?))*\s+reset\b[^\n]*--hard\b'
+  
+  - description: '[GIT_WRITE] Deny git reset to and wipe'
+    enabled: true
+    group: GIT_WRITE
+    pattern: '\bgit\b(?:\s+(?:--?[a-zA-Z0-9_-]+(?:=[^\s]+)?(?:\s+[^-\s][^\s]*)?))*\s+reset\b[^\n]*HEAD~?\d*\b'
+  
+  # --- CONFIG IMPERSONATION ---
+  - description: '[GIT_WRITE] Deny git config user.email/identity set'
+    enabled: true
+    group: GIT_WRITE
+    pattern: '\bgit\b(?:\s+(?:--?[a-zA-Z0-9_-]+(?:=[^\s]+)?(?:\s+[^-\s][^\s]*)?))*\s+config\b[^\n]*\b(?:user\.(?:email|name|signingkey)|commit\.gpgsign|gpg\.program)\b'
+  
+  - description: '[GIT_WRITE] Deny git config --global (writes outside repo)'
+    enabled: true
+    group: GIT_WRITE
+    pattern: '\bgit\b(?:\s+(?:--?[a-zA-Z0-9_-]+(?:=[^\s]+)?(?:\s+[^-\s][^\s]*)?))*\s+config\b[^\n]*--global\b'
+  
+  # --- HOOKS (code execution) ---
+  # git hooks can run arbitrary code on commit/push/etc — explicit block
+  - description: '[GIT_WRITE] Deny modifying git hooks'
+    enabled: true
+    group: GIT_WRITE
+    pattern: '\bgit\b(?:\s+(?:--?[a-zA-Z0-9_-]+(?:=[^\s]+)?(?:\s+[^-\s][^\s]*)?))*\s+config\b[^\n]*\b(?:core\.hooksPath|alias\.(?:commit|push|merge|stash|reset|checkout))\b'
+  
+  # --- CLEAN WITH FORCE/IGNORED ---
+  - description: '[GIT_WRITE] Deny git clean -fdx (wipes ignored too)'
+    enabled: true
+    group: GIT_WRITE
+    pattern: '\bgit\b(?:\s+(?:--?[a-zA-Z0-9_-]+(?:=[^\s]+)?(?:\s+[^-\s][^\s]*)?))*\s+clean\b[^\n]*-(?:f[dx]|fdx|xf|fx)\b'

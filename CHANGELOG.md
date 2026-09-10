@@ -1,5 +1,9 @@
 # Change Log
 
+## 0.4.4
+
+- Added more example rules. Thanks the @gothicserpent for the contribution.
+
 ## 0.4.3
 
 - Replace test glob fixtures with benign alternatives so the plugin security

@@ -1,0 +1,53 @@
+# Catches non-git shell commands that destroy repo state, work, or uncommitted files.
+deny_patterns:
+  # --- DELETE THE WHOLE .GIT DIRECTORY ---
+  # The git-pattern rule can't help if the agent just `rm -rf .git`
+  - description: '[REPO_DESTROY] Deny rm -rf .git'
+    enabled: true
+    group: REPO_DESTROY
+    pattern: '\brm\b(?:\s+(?:--?[a-zA-Z0-9_-]+(?:\s+[^-\s][^\s]*)?))*\s+(?:--?rf|--?fr|-r\s+-f|-f\s+-r|-rf|-fr)\s+(?:\.?\/?\.git|\.git|\.\/\.git)\b'
+  
+  - description: '[REPO_DESTROY] Deny rm of .git subpath'
+    enabled: true
+    group: REPO_DESTROY
+    pattern: '\brm\b(?:\s+(?:--?[a-zA-Z0-9_-]+(?:\s+[^-\s][^\s]*)?))*\s+(?:-r|-f|-rf|-fr|--recursive|--force)\s+(?:\.?\/?\.git(?:\/|\b)|\.\/\.git\b)'
+  
+  - description: '[REPO_DESTROY] Deny rmdir of .git'
+    enabled: true
+    group: REPO_DESTROY
+    pattern: '\brmdir\b[^\n]*\.git\b'
+  
+  # --- DELETE BRANCH POINTER FILES DIRECTLY ---
+  # `rm .git/refs/heads/main` corrupts git state without using git
+  - description: '[REPO_DESTROY] Deny rm of .git/refs or objects'
+    enabled: true
+    group: REPO_DESTROY
+    pattern: '\brm\b[^\n]*(?:\.git\/(?:refs|objects|packed-refs|HEAD|FETCH_HEAD|ORIG_HEAD|MERGE_HEAD|index)|packed-refs)\b'
+  
+  # --- DISK-LEVEL WIPES THAT WOULD CATCH A REPO ---
+  # These also catch vcpkg/build dir accidents on a broader set
+  - description: '[REPO_DESTROY] Deny find ... -delete on .git'
+    enabled: true
+    group: REPO_DESTROY
+    pattern: '\bfind\b[^\n]*\.git\b[^\n]*(?:-delete|--delete|-exec\s+rm|-exec\s+sh)'
+  
+  - description: '[REPO_DESTROY] Deny find ... -delete without path constraint (broad wipe)'
+    enabled: true
+    group: REPO_DESTROY
+    pattern: '\bfind\b[^\n]*-delete\b'
+  
+  - description: '[REPO_DESTROY] Deny find -exec rm -rf (any form)'
+    enabled: true
+    group: REPO_DESTROY
+    pattern: '\bfind\b[^\n]*-exec\s+rm\b[^\n]*(?:-rf|-fr|-r\s+-f|-f\s+-r)'
+  
+  # --- TRUNCATE/EMPTY-OUT FILES IN GIT CONTROL ---
+  - description: '[REPO_DESTROY] Deny truncation of .git internal files'
+    enabled: true
+    group: REPO_DESTROY
+    pattern: '\b(?:>|>>|truncate|dd\b)[^\n]*\.git\/(?:refs|objects|index|HEAD|FETCH_HEAD|MERGE_HEAD|ORIG_HEAD|packed-refs)\b'
+  
+  - description: '[REPO_DESTROY] Deny dd if=/dev/zero into tracked files'
+    enabled: true
+    group: REPO_DESTROY
+    pattern: '\bdd\b[^\n]*if=\/dev\/(?:zero|urandom)\b[^\n]*of='

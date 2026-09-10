@@ -1,0 +1,311 @@
+# Uses deny_patterns with regex patterns for high-precision command matching.
+# This format is needed because glob-based matching cannot express the
+# complex negative lookahead and option-parsing required to prevent
+# arguments like `-c key=value` or `-C /path` from bypassing subcommand rules.
+deny_patterns:
+  # NOTE: FLAG token now matches BOTH "--flag=value" and "--flag value" / "-C path" forms,
+  # so global options placed before the subcommand (e.g. `git -c foo=bar update-index`,
+  # `git -C /path checkout`) can no longer be used to slip a write subcommand past these rules.
+  # FLAG := (?:--?[a-zA-Z0-9_-]+(?:=[^\s]+)?(?:\s+[^\s-][^\s]*)?)
+
+  # --- WORKING DIRECTORY & INDEX MODIFICATIONS ---
+  - description: '[GIT_WRITE] Deny git add'
+    enabled: true
+    group: GIT_WRITE
+    pattern: '\bgit\b(?:\s+(?:--?[a-zA-Z0-9_-]+(?:=[^\s]+)?(?:\s+[^\s-][^\s]*)?))*\s+add\b.*'
+  - description: '[GIT_WRITE] Deny git rm'
+    enabled: true
+    group: GIT_WRITE
+    pattern: '\bgit\b(?:\s+(?:--?[a-zA-Z0-9_-]+(?:=[^\s]+)?(?:\s+[^\s-][^\s]*)?))*\s+rm\b.*'
+  - description: '[GIT_WRITE] Deny git mv'
+    enabled: true
+    group: GIT_WRITE
+    pattern: '\bgit\b(?:\s+(?:--?[a-zA-Z0-9_-]+(?:=[^\s]+)?(?:\s+[^\s-][^\s]*)?))*\s+mv\b.*'
+  - description: '[GIT_WRITE] Deny git clean'
+    enabled: true
+    group: GIT_WRITE
+    pattern: '\bgit\b(?:\s+(?:--?[a-zA-Z0-9_-]+(?:=[^\s]+)?(?:\s+[^\s-][^\s]*)?))*\s+clean\b.*'
+  - description: '[GIT_WRITE] Deny git restore'
+    enabled: true
+    group: GIT_WRITE
+    pattern: '\bgit\b(?:\s+(?:--?[a-zA-Z0-9_-]+(?:=[^\s]+)?(?:\s+[^\s-][^\s]*)?))*\s+restore\b.*'
+  - description: '[GIT_WRITE] Deny git checkout'
+    enabled: true
+    group: GIT_WRITE
+    pattern: '\bgit\b(?:\s+(?:--?[a-zA-Z0-9_-]+(?:=[^\s]+)?(?:\s+[^\s-][^\s]*)?))*\s+checkout\b.*'
+  - description: '[GIT_WRITE] Deny git switch'
+    enabled: true
+    group: GIT_WRITE
+    pattern: '\bgit\b(?:\s+(?:--?[a-zA-Z0-9_-]+(?:=[^\s]+)?(?:\s+[^\s-][^\s]*)?))*\s+switch\b.*'
+  - description: '[GIT_WRITE] Deny git sparse-checkout'
+    enabled: true
+    group: GIT_WRITE
+    pattern: '\bgit\b(?:\s+(?:--?[a-zA-Z0-9_-]+(?:=[^\s]+)?(?:\s+[^\s-][^\s]*)?))*\s+sparse-checkout\b.*'
+
+  # --- COMMITTING & BRANCHING ---
+  - description: '[GIT_WRITE] Deny git commit'
+    enabled: true
+    group: GIT_WRITE
+    pattern: '\bgit\b(?:\s+(?:--?[a-zA-Z0-9_-]+(?:=[^\s]+)?(?:\s+[^\s-][^\s]*)?))*\s+commit\b.*'
+  - description: '[GIT_WRITE] Deny git branch'
+    enabled: true
+    group: GIT_WRITE
+    pattern: '\bgit\b(?:\s+(?:--?[a-zA-Z0-9_-]+(?:=[^\s]+)?(?:\s+[^\s-][^\s]*)?))*\s+branch\b.*'
+  - description: '[GIT_WRITE] Deny git merge'
+    enabled: true
+    group: GIT_WRITE
+    pattern: '\bgit\b(?:\s+(?:--?[a-zA-Z0-9_-]+(?:=[^\s]+)?(?:\s+[^\s-][^\s]*)?))*\s+merge\b.*'
+  - description: '[GIT_WRITE] Deny git rebase'
+    enabled: true
+    group: GIT_WRITE
+    pattern: '\bgit\b(?:\s+(?:--?[a-zA-Z0-9_-]+(?:=[^\s]+)?(?:\s+[^\s-][^\s]*)?))*\s+rebase\b.*'
+  - description: '[GIT_WRITE] Deny git cherry-pick'
+    enabled: true
+    group: GIT_WRITE
+    pattern: '\bgit\b(?:\s+(?:--?[a-zA-Z0-9_-]+(?:=[^\s]+)?(?:\s+[^\s-][^\s]*)?))*\s+cherry-pick\b.*'
+  - description: '[GIT_WRITE] Deny git revert'
+    enabled: true
+    group: GIT_WRITE
+    pattern: '\bgit\b(?:\s+(?:--?[a-zA-Z0-9_-]+(?:=[^\s]+)?(?:\s+[^\s-][^\s]*)?))*\s+revert\b.*'
+  - description: '[GIT_WRITE] Deny git stash'
+    enabled: true
+    group: GIT_WRITE
+    pattern: '\bgit\b(?:\s+(?:--?[a-zA-Z0-9_-]+(?:=[^\s]+)?(?:\s+[^\s-][^\s]*)?))*\s+stash\b.*'
+  - description: '[GIT_WRITE] Deny git subtree'
+    enabled: true
+    group: GIT_WRITE
+    pattern: '\bgit\b(?:\s+(?:--?[a-zA-Z0-9_-]+(?:=[^\s]+)?(?:\s+[^\s-][^\s]*)?))*\s+subtree\b.*'
+
+  # --- REMOTE OPERATIONS ---
+  - description: '[GIT_WRITE] Deny git push'
+    enabled: true
+    group: GIT_WRITE
+    pattern: '\bgit\b(?:\s+(?:--?[a-zA-Z0-9_-]+(?:=[^\s]+)?(?:\s+[^\s-][^\s]*)?))*\s+push\b.*'
+  - description: '[GIT_WRITE] Deny git pull'
+    enabled: true
+    group: GIT_WRITE
+    pattern: '\bgit\b(?:\s+(?:--?[a-zA-Z0-9_-]+(?:=[^\s]+)?(?:\s+[^\s-][^\s]*)?))*\s+pull\b.*'
+  - description: '[GIT_WRITE] Deny git fetch'
+    enabled: true
+    group: GIT_WRITE
+    pattern: '\bgit\b(?:\s+(?:--?[a-zA-Z0-9_-]+(?:=[^\s]+)?(?:\s+[^\s-][^\s]*)?))*\s+fetch\b.*'
+  - description: '[GIT_WRITE] Deny git remote'
+    enabled: true
+    group: GIT_WRITE
+    pattern: '\bgit\b(?:\s+(?:--?[a-zA-Z0-9_-]+(?:=[^\s]+)?(?:\s+[^\s-][^\s]*)?))*\s+remote\b.*'
+  - description: '[GIT_WRITE] Deny git clone'
+    enabled: true
+    group: GIT_WRITE
+    pattern: '\bgit\b(?:\s+(?:--?[a-zA-Z0-9_-]+(?:=[^\s]+)?(?:\s+[^\s-][^\s]*)?))*\s+clone\b.*'
+  - description: '[GIT_WRITE] Deny git send-pack'
+    enabled: true
+    group: GIT_WRITE
+    pattern: '\bgit\b(?:\s+(?:--?[a-zA-Z0-9_-]+(?:=[^\s]+)?(?:\s+[^\s-][^\s]*)?))*\s+send-pack\b.*'
+  - description: '[GIT_WRITE] Deny git http-push'
+    enabled: true
+    group: GIT_WRITE
+    pattern: '\bgit\b(?:\s+(?:--?[a-zA-Z0-9_-]+(?:=[^\s]+)?(?:\s+[^\s-][^\s]*)?))*\s+http-push\b.*'
+
+  # --- HISTORY REWRITING & DANGEROUS OPERATIONS ---
+  - description: '[GIT_WRITE] Deny git reset'
+    enabled: true
+    group: GIT_WRITE
+    pattern: '\bgit\b(?:\s+(?:--?[a-zA-Z0-9_-]+(?:=[^\s]+)?(?:\s+[^\s-][^\s]*)?))*\s+reset\b.*'
+  - description: '[GIT_WRITE] Deny git filter-branch'
+    enabled: true
+    group: GIT_WRITE
+    pattern: '\bgit\b(?:\s+(?:--?[a-zA-Z0-9_-]+(?:=[^\s]+)?(?:\s+[^\s-][^\s]*)?))*\s+filter-branch\b.*'
+  - description: '[GIT_WRITE] Deny git filter-repo'
+    enabled: true
+    group: GIT_WRITE
+    pattern: '\bgit\b(?:\s+(?:--?[a-zA-Z0-9_-]+(?:=[^\s]+)?(?:\s+[^\s-][^\s]*)?))*\s+filter-repo\b.*'
+  - description: '[GIT_WRITE] Deny git reflog'
+    enabled: true
+    group: GIT_WRITE
+    pattern: '\bgit\b(?:\s+(?:--?[a-zA-Z0-9_-]+(?:=[^\s]+)?(?:\s+[^\s-][^\s]*)?))*\s+reflog\b.*'
+  - description: '[GIT_WRITE] Deny git replace'
+    enabled: true
+    group: GIT_WRITE
+    pattern: '\bgit\b(?:\s+(?:--?[a-zA-Z0-9_-]+(?:=[^\s]+)?(?:\s+[^\s-][^\s]*)?))*\s+replace\b.*'
+
+  # --- UTILITY, SETUP, & REPO MODIFICATION ---
+  - description: '[GIT_WRITE] Deny git init'
+    enabled: true
+    group: GIT_WRITE
+    pattern: '\bgit\b(?:\s+(?:--?[a-zA-Z0-9_-]+(?:=[^\s]+)?(?:\s+[^\s-][^\s]*)?))*\s+init\b.*'
+  - description: '[GIT_WRITE] Deny git config'
+    enabled: true
+    group: GIT_WRITE
+    pattern: '\bgit\b(?:\s+(?:--?[a-zA-Z0-9_-]+(?:=[^\s]+)?(?:\s+[^\s-][^\s]*)?))*\s+config\b.*'
+  - description: '[GIT_WRITE] Deny git submodule'
+    enabled: true
+    group: GIT_WRITE
+    pattern: '\bgit\b(?:\s+(?:--?[a-zA-Z0-9_-]+(?:=[^\s]+)?(?:\s+[^\s-][^\s]*)?))*\s+submodule\b.*'
+  - description: '[GIT_WRITE] Deny git worktree'
+    enabled: true
+    group: GIT_WRITE
+    pattern: '\bgit\b(?:\s+(?:--?[a-zA-Z0-9_-]+(?:=[^\s]+)?(?:\s+[^\s-][^\s]*)?))*\s+worktree\b.*'
+  - description: '[GIT_WRITE] Deny git gc'
+    enabled: true
+    group: GIT_WRITE
+    pattern: '\bgit\b(?:\s+(?:--?[a-zA-Z0-9_-]+(?:=[^\s]+)?(?:\s+[^\s-][^\s]*)?))*\s+gc\b.*'
+  - description: '[GIT_WRITE] Deny git prune'
+    enabled: true
+    group: GIT_WRITE
+    pattern: '\bgit\b(?:\s+(?:--?[a-zA-Z0-9_-]+(?:=[^\s]+)?(?:\s+[^\s-][^\s]*)?))*\s+prune\b.*'
+  - description: '[GIT_WRITE] Deny git archive'
+    enabled: true
+    group: GIT_WRITE
+    pattern: '\bgit\b(?:\s+(?:--?[a-zA-Z0-9_-]+(?:=[^\s]+)?(?:\s+[^\s-][^\s]*)?))*\s+archive\b.*'
+  - description: '[GIT_WRITE] Deny git bundle'
+    enabled: true
+    group: GIT_WRITE
+    pattern: '\bgit\b(?:\s+(?:--?[a-zA-Z0-9_-]+(?:=[^\s]+)?(?:\s+[^\s-][^\s]*)?))*\s+bundle\b.*'
+  - description: '[GIT_WRITE] Deny git notes'
+    enabled: true
+    group: GIT_WRITE
+    pattern: '\bgit\b(?:\s+(?:--?[a-zA-Z0-9_-]+(?:=[^\s]+)?(?:\s+[^\s-][^\s]*)?))*\s+notes\b.*'
+  - description: '[GIT_WRITE] Deny git tag'
+    enabled: true
+    group: GIT_WRITE
+    pattern: '\bgit\b(?:\s+(?:--?[a-zA-Z0-9_-]+(?:=[^\s]+)?(?:\s+[^\s-][^\s]*)?))*\s+tag\b.*'
+  - description: '[GIT_WRITE] Deny git bisect'
+    enabled: true
+    group: GIT_WRITE
+    pattern: '\bgit\b(?:\s+(?:--?[a-zA-Z0-9_-]+(?:=[^\s]+)?(?:\s+[^\s-][^\s]*)?))*\s+bisect\b.*'
+  - description: '[GIT_WRITE] Deny git maintenance'
+    enabled: true
+    group: GIT_WRITE
+    pattern: '\bgit\b(?:\s+(?:--?[a-zA-Z0-9_-]+(?:=[^\s]+)?(?:\s+[^\s-][^\s]*)?))*\s+maintenance\b.*'
+  - description: '[GIT_WRITE] Deny git rerere'
+    enabled: true
+    group: GIT_WRITE
+    pattern: '\bgit\b(?:\s+(?:--?[a-zA-Z0-9_-]+(?:=[^\s]+)?(?:\s+[^\s-][^\s]*)?))*\s+rerere\b.*'
+
+  # --- PLUMBING (LOW LEVEL DIRECT OBJECT WRITES) ---
+  - description: '[GIT_WRITE] Deny git am'
+    enabled: true
+    group: GIT_WRITE
+    pattern: '\bgit\b(?:\s+(?:--?[a-zA-Z0-9_-]+(?:=[^\s]+)?(?:\s+[^\s-][^\s]*)?))*\s+am\b.*'
+  - description: '[GIT_WRITE] Deny git apply'
+    enabled: true
+    group: GIT_WRITE
+    pattern: '\bgit\b(?:\s+(?:--?[a-zA-Z0-9_-]+(?:=[^\s]+)?(?:\s+[^\s-][^\s]*)?))*\s+apply\b.*'
+  - description: '[GIT_WRITE] Deny git commit-tree'
+    enabled: true
+    group: GIT_WRITE
+    pattern: '\bgit\b(?:\s+(?:--?[a-zA-Z0-9_-]+(?:=[^\s]+)?(?:\s+[^\s-][^\s]*)?))*\s+commit-tree\b.*'
+  - description: '[GIT_WRITE] Deny git hash-object'
+    enabled: true
+    group: GIT_WRITE
+    pattern: '\bgit\b(?:\s+(?:--?[a-zA-Z0-9_-]+(?:=[^\s]+)?(?:\s+[^\s-][^\s]*)?))*\s+hash-object\b.*'
+  - description: '[GIT_WRITE] Deny git mktag'
+    enabled: true
+    group: GIT_WRITE
+    pattern: '\bgit\b(?:\s+(?:--?[a-zA-Z0-9_-]+(?:=[^\s]+)?(?:\s+[^\s-][^\s]*)?))*\s+mktag\b.*'
+  - description: '[GIT_WRITE] Deny git update-index'
+    enabled: true
+    group: GIT_WRITE
+    pattern: '\bgit\b(?:\s+(?:--?[a-zA-Z0-9_-]+(?:=[^\s]+)?(?:\s+[^\s-][^\s]*)?))*\s+update-index\b.*'
+  - description: '[GIT_WRITE] Deny git update-ref'
+    enabled: true
+    group: GIT_WRITE
+    pattern: '\bgit\b(?:\s+(?:--?[a-zA-Z0-9_-]+(?:=[^\s]+)?(?:\s+[^\s-][^\s]*)?))*\s+update-ref\b.*'
+  - description: '[GIT_WRITE] Deny git write-tree'
+    enabled: true
+    group: GIT_WRITE
+    pattern: '\bgit\b(?:\s+(?:--?[a-zA-Z0-9_-]+(?:=[^\s]+)?(?:\s+[^\s-][^\s]*)?))*\s+write-tree\b.*'
+  - description: '[GIT_WRITE] Deny git fast-import'
+    enabled: true
+    group: GIT_WRITE
+    pattern: '\bgit\b(?:\s+(?:--?[a-zA-Z0-9_-]+(?:=[^\s]+)?(?:\s+[^\s-][^\s]*)?))*\s+fast-import\b.*'
+  - description: '[GIT_WRITE] Deny git receive-pack'
+    enabled: true
+    group: GIT_WRITE
+    pattern: '\bgit\b(?:\s+(?:--?[a-zA-Z0-9_-]+(?:=[^\s]+)?(?:\s+[^\s-][^\s]*)?))*\s+receive-pack\b.*'
+  - description: '[GIT_WRITE] Deny git symbolic-ref'
+    enabled: true
+    group: GIT_WRITE
+    pattern: '\bgit\b(?:\s+(?:--?[a-zA-Z0-9_-]+(?:=[^\s]+)?(?:\s+[^\s-][^\s]*)?))*\s+symbolic-ref\b.*'
+  - description: '[GIT_WRITE] Deny git repack'
+    enabled: true
+    group: GIT_WRITE
+    pattern: '\bgit\b(?:\s+(?:--?[a-zA-Z0-9_-]+(?:=[^\s]+)?(?:\s+[^\s-][^\s]*)?))*\s+repack\b.*'
+  - description: '[GIT_WRITE] Deny git pack-refs'
+    enabled: true
+    group: GIT_WRITE
+    pattern: '\bgit\b(?:\s+(?:--?[a-zA-Z0-9_-]+(?:=[^\s]+)?(?:\s+[^\s-][^\s]*)?))*\s+pack-refs\b.*'
+  - description: '[GIT_WRITE] Deny git prune-packed'
+    enabled: true
+    group: GIT_WRITE
+    pattern: '\bgit\b(?:\s+(?:--?[a-zA-Z0-9_-]+(?:=[^\s]+)?(?:\s+[^\s-][^\s]*)?))*\s+prune-packed\b.*'
+  - description: '[GIT_WRITE] Deny git index-pack'
+    enabled: true
+    group: GIT_WRITE
+    pattern: '\bgit\b(?:\s+(?:--?[a-zA-Z0-9_-]+(?:=[^\s]+)?(?:\s+[^\s-][^\s]*)?))*\s+index-pack\b.*'
+  - description: '[GIT_WRITE] Deny git unpack-objects'
+    enabled: true
+    group: GIT_WRITE
+    pattern: '\bgit\b(?:\s+(?:--?[a-zA-Z0-9_-]+(?:=[^\s]+)?(?:\s+[^\s-][^\s]*)?))*\s+unpack-objects\b.*'
+  - description: '[GIT_WRITE] Deny git commit-graph write'
+    enabled: true
+    group: GIT_WRITE
+    pattern: '\bgit\b(?:\s+(?:--?[a-zA-Z0-9_-]+(?:=[^\s]+)?(?:\s+[^\s-][^\s]*)?))*\s+commit-graph\s+write\b.*'
+  - description: '[GIT_WRITE] Deny git multi-pack-index write'
+    enabled: true
+    group: GIT_WRITE
+    pattern: '\bgit\b(?:\s+(?:--?[a-zA-Z0-9_-]+(?:=[^\s]+)?(?:\s+[^\s-][^\s]*)?))*\s+multi-pack-index\s+write\b.*'
+  - description: '[GIT_WRITE] Deny git update-server-info'
+    enabled: true
+    group: GIT_WRITE
+    pattern: '\bgit\b(?:\s+(?:--?[a-zA-Z0-9_-]+(?:=[^\s]+)?(?:\s+[^\s-][^\s]*)?))*\s+update-server-info\b.*'
+
+  # --- GITHUB CLI (GH) DESTRUCTIVE OPERATIONS ---
+  - description: '[GH_WRITE] Deny gh API modifications (POST, PUT, PATCH, DELETE)'
+    enabled: true
+    group: GH_WRITE
+    pattern: '\bgh\b(?:\s+(?:--?[a-zA-Z0-9_-]+(?:=[^\s]+)?))*\s+api\b.*-(?:X|-method)\s+(?:POST|PUT|PATCH|DELETE)\b.*'
+  - description: '[GH_WRITE] Deny gh api implicit-POST via field flags'
+    enabled: true
+    group: GH_WRITE
+    pattern: '\bgh\b(?:\s+(?:--?[a-zA-Z0-9_-]+(?:=[^\s]+)?))*\s+api\b.*\s+(?:-f|--field|--raw-field|--input)\b.*'
+  - description: '[GH_WRITE] Deny gh repo modifications'
+    enabled: true
+    group: GH_WRITE
+    pattern: '\bgh\b(?:\s+(?:--?[a-zA-Z0-9_-]+(?:=[^\s]+)?))*\s+repo\s+(?:create|delete|edit|fork|rename|archive)\b.*'
+  - description: '[GH_WRITE] Deny gh issue modifications'
+    enabled: true
+    group: GH_WRITE
+    pattern: '\bgh\b(?:\s+(?:--?[a-zA-Z0-9_-]+(?:=[^\s]+)?))*\s+issue\s+(?:create|close|delete|edit|reopen|transfer)\b.*'
+  - description: '[GH_WRITE] Deny gh PR modifications'
+    enabled: true
+    group: GH_WRITE
+    pattern: '\bgh\b(?:\s+(?:--?[a-zA-Z0-9_-]+(?:=[^\s]+)?))*\s+pr\s+(?:create|close|merge|ready|reopen|review)\b.*'
+  - description: '[GH_WRITE] Deny gh release modifications'
+    enabled: true
+    group: GH_WRITE
+    pattern: '\bgh\b(?:\s+(?:--?[a-zA-Z0-9_-]+(?:=[^\s]+)?))*\s+release\s+(?:create|delete|upload)\b.*'
+  - description: '[GH_WRITE] Deny gh workflow/run modifications'
+    enabled: true
+    group: GH_WRITE
+    pattern: '\bgh\b(?:\s+(?:--?[a-zA-Z0-9_-]+(?:=[^\s]+)?))*\s+(?:workflow|run)\s+(?:run|cancel|delete|rerun|enable|disable)\b.*'
+  - description: '[GH_WRITE] Deny gh gist modifications'
+    enabled: true
+    group: GH_WRITE
+    pattern: '\bgh\b(?:\s+(?:--?[a-zA-Z0-9_-]+(?:=[^\s]+)?))*\s+gist\s+(?:create|delete|edit|clone)\b.*'
+  - description: '[GH_WRITE] Deny gh label modifications'
+    enabled: true
+    group: GH_WRITE
+    pattern: '\bgh\b(?:\s+(?:--?[a-zA-Z0-9_-]+(?:=[^\s]+)?))*\s+label\s+(?:create|delete|edit|clone)\b.*'
+  - description: '[GH_WRITE] Deny gh secret modifications'
+    enabled: true
+    group: GH_WRITE
+    pattern: '\bgh\b(?:\s+(?:--?[a-zA-Z0-9_-]+(?:=[^\s]+)?))*\s+secret\s+(?:set|delete)\b.*'
+  - description: '[GH_WRITE] Deny gh variable modifications'
+    enabled: true
+    group: GH_WRITE
+    pattern: '\bgh\b(?:\s+(?:--?[a-zA-Z0-9_-]+(?:=[^\s]+)?))*\s+variable\s+(?:set|delete)\b.*'
+  - description: '[GH_WRITE] Deny gh project modifications'
+    enabled: true
+    group: GH_WRITE
+    pattern: '\bgh\b(?:\s+(?:--?[a-zA-Z0-9_-]+(?:=[^\s]+)?))*\s+project\s+(?:create|delete|edit|close|copy|link|unlink)\b.*'

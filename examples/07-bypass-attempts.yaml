@@ -1,0 +1,53 @@
+# Catches deliberate attempts to slip git commands past pattern matching via shell metachars, eval, subshells, or PATH manipulation.
+deny_patterns:
+  # --- EVAL / SOURCE WRAPPERS ---
+  # `eval "git push ..."`, `bash -c "git ..."`, `sh -c 'git ...'`
+  - description: '[BYPASS] Deny eval wrapping git write subcommand'
+    enabled: true
+    group: BYPASS
+    pattern: '\beval\b[^\n]*\b(?:git|gh)\b[^\n]*\b(?:commit|push|merge|rebase|reset|clean|restore|checkout|switch|update-index|update-ref|filter-branch|filter-repo|cherry-pick|revert|stash|add|rm|mv|am|apply|fast-import|symbolic-ref|receive-pack)\b'
+  
+  - description: '[BYPASS] Deny bash -c / sh -c / zsh -c wrapping git writes'
+    enabled: true
+    group: BYPASS
+    pattern: '\b(?:bash|sh|zsh|dash|ksh|fish)\b\s+-c\b[^\n]*\b(?:git|gh)\b[^\n]*\b(?:commit|push|merge|rebase|reset|clean|restore|checkout|switch|update-index|update-ref|filter-branch|filter-repo|cherry-pick|revert|stash|add|rm|mv|am|apply|fast-import|symbolic-ref|receive-pack)\b'
+  
+  # --- XARGS WRAPPING ---
+  - description: '[BYPASS] Deny xargs git<write>'
+    enabled: true
+    group: BYPASS
+    pattern: '\bxargs\b[^\n]*\b(?:git|gh)\b[^\n]*\b(?:commit|push|merge|rebase|reset|clean|restore|checkout|switch|update-index|update-ref|filter-branch|filter-repo|cherry-pick|revert|stash|add|rm|mv|am|apply|fast-import|symbolic-ref|receive-pack)\b'
+  
+  # --- HEREDOC / COMMAND SUBSTITUTION ---
+  # `bash <<EOF ... git commit ... EOF` and `$()` substitution
+  - description: '[BYPASS] Deny heredoc containing git write subcommand'
+    enabled: true
+    group: BYPASS
+    pattern: '<<[^\n]*\b(?:git|gh)\b[^\n]*\b(?:commit|push|merge|rebase|reset|clean|restore|checkout|switch|update-index|update-ref|filter-branch|filter-repo|cherry-pick|revert|stash|add|rm|mv|am|apply|fast-import|symbolic-ref|receive-pack)\b'
+  
+  - description: '[BYPASS] Deny $(...) command substitution with git writes'
+    enabled: true
+    group: BYPASS
+    pattern: '\$\([^\n]*\b(?:git|gh)\b[^\n]*\b(?:commit|push|merge|rebase|reset|clean|restore|checkout|switch|update-index|update-ref|filter-branch|filter-repo|cherry-pick|revert|stash|add|rm|mv|am|apply|fast-import|symbolic-ref|receive-pack)\b'
+  
+  # --- PATH / ALIAS WRAPPERS ---
+  # Redefining `git` to a script before invoking
+  - description: '[BYPASS] Deny alias/path override before git invocation'
+    enabled: true
+    group: BYPASS
+    pattern: '\b(?:alias\s+git|export\s+PATH|ln\s+-s\w*|cp\s+-f)\b[^\n]*\bgit\b'
+  
+  # --- ENV-VAR TRICKS ---
+  # `GIT_SSH_COMMAND='rm -rf ~' git push` style
+  - description: '[BYPASS] Deny GIT_* env vars with destructive commands'
+    enabled: true
+    group: BYPASS
+    pattern: '\bGIT_(?:SSH_COMMAND|COMMITTER_DATE|AUTHOR_DATE|EXTERNAL_DIFF|DIFF_TEXT_CONV|TEMPLATE_DIR|EDITOR|CORE_PAGER|PAGER)\b\s*=[^\n]*(?:rm\s+-rf|rm\s+-fr|;\s*rm\s+|&&\s*rm\s+|\|\s*rm\s+|>|\$\(rm\b)'
+  
+  # --- UNICODE / HOMOGLYPH SMUGGLING (best-effort) ---
+  # If your wrapper normalizes, this catches obvious substitutions of "git" with lookalikes
+  # Note: this is heuristic only — true defense is shell tokenization, not regex
+  - description: '[BYPASS] Deny lookalike git (cyrillic/homoglyph)'
+    enabled: true
+    group: BYPASS
+    pattern: '\b(?:gіt|gıt|g\u0455t|ｇit|giт)\b[^\n]*\b(?:commit|push|merge|rebase|reset|clean|restore|checkout|switch|update-index|update-ref)\b'
