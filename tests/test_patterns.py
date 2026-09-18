@@ -699,3 +699,53 @@ def test_find_uncovered_allow_shadowing_skips_non_shadowing_allows():
     allow = [(_c(r"\bmyapp\s+read\b"), "MyApp read")]
     builtins = [(_c(r"\brm\s+-rf\b"), "rm with -rf flag")]
     assert find_uncovered_allow_shadowing(allow, [], builtins) == []
+
+
+# ---------------------------------------------------------------------------
+# Catch-all allow pattern refusal
+# ---------------------------------------------------------------------------
+
+
+def test_catch_all_reason_refuses_catch_all_allow_patterns():
+    """Literal catch-alls, blanks, and probe-matching patterns are refused."""
+    from patterns import _CATCH_ALL_PROBES, catch_all_reason, is_catch_all_allow_pattern
+
+    refused = [".*", ".+", "^.*$", "^.+$", "(?s).*", r"[\s\S]*", "^", r"\b", "", "   ", None]
+    # An allow pattern that exactly whitelists a built-in dangerous example.
+    refused.append(re.escape(_CATCH_ALL_PROBES[0]))
+    for pat in refused:
+        assert catch_all_reason(pat) is not None, pat
+        assert is_catch_all_allow_pattern(pat), pat
+
+
+def test_catch_all_reason_accepts_narrow_allow_patterns():
+    """Ordinary scoped allow patterns (and uncompilable ones) are not refused."""
+    from patterns import catch_all_reason
+
+    accepted = (
+        r"\bvultr\s+account\s+info\b",
+        r"^git\s+status\b",
+        r"\bls(?!/)\s+-la\b",
+        "[unclosed",
+    )
+    for pat in accepted:
+        assert catch_all_reason(pat) is None, pat
+
+
+def test_compile_allow_patterns_skips_catch_all_with_error(caplog):
+    """compile_allow_patterns drops catch-all entries and logs at ERROR."""
+    import logging
+
+    from patterns import compile_allow_patterns
+
+    raw = [
+        {"pattern": ".*", "description": "Allow everything"},
+        {"pattern": r"\bvultr\s+account\s+info\b", "description": "Vultr info"},
+    ]
+    with caplog.at_level(logging.ERROR, logger="patterns"):
+        compiled = compile_allow_patterns(raw)
+    assert [desc for _, desc in compiled] == ["Vultr info"]
+    assert any(
+        rec.levelno == logging.ERROR and "REFUSING allow pattern" in rec.getMessage()
+        for rec in caplog.records
+    )

@@ -1102,12 +1102,18 @@ def cmd_add(
     dry_run: bool = False,
     glob_str: str | None = None,
     target_file: str | None = None,
+    force: bool = False,
 ) -> tuple[str, str, int]:
     """Add a custom pattern via interactive prompts or CLI flags.
 
     With no arguments, launches interactive entry automatically.
     Use --target FILENAME to write to a specific YAML file in the config
     directory (requires directory mode; file extension must be .yaml).
+
+    Catch-all allow patterns (``.*``, ``^.+$``, empty, or anything that
+    matches the built-in dangerous-command examples) are refused. Passing
+    ``--force`` on an interactive terminal downgrades the refusal to an
+    explicit y/N confirmation; it is never accepted non-interactively.
     """
     from .config import load_config, resolve_config_path
     from .patterns import glob_to_regex
@@ -1137,7 +1143,7 @@ def cmd_add(
 
     # Go interactive when no type, pattern/glob, or description provided
     if not pattern_type and not pattern and not description and not glob_str and not target_file:
-        return _add_interactive(config, config_path, dry_run, target_file)
+        return _add_interactive(config, config_path, dry_run, target_file, force=force)
 
     # Handle --glob (mutually exclusive with --pattern)
     if glob_str and pattern:
@@ -1181,6 +1187,7 @@ def cmd_add(
         dry_run,
         glob_str if glob_str else None,
         target_file,
+        force=force,
     )
 
 
@@ -1189,6 +1196,7 @@ def _add_interactive(
     config_path: Path,
     dry_run: bool,
     target_file: str | None = None,
+    force: bool = False,
 ) -> tuple[str, str, int]:
     """Guided interactive pattern entry with glob-to-regex support.
 
@@ -1355,7 +1363,60 @@ def _add_interactive(
         dry_run,
         glob_str if glob_str else None,
         target_file,
+        force=force,
     )
+
+
+def _refuse_catch_all_allow(pattern: str, force: bool) -> tuple[str, int] | None:
+    """Refuse a catch-all allow pattern; return ``(output, exit_code)`` or None.
+
+    Returns None when the pattern is acceptable, or when ``force`` was
+    passed on an interactive terminal *and* the user confirmed with ``y``.
+    ``--force`` is deliberately ineffective when stdin is not a TTY so a
+    script or an agent cannot bypass the refusal non-interactively.
+    """
+    from .patterns import catch_all_reason
+
+    reason = catch_all_reason(pattern)
+    if reason is None:
+        return None
+
+    try:
+        from rich.markup import escape as _rich_escape
+    except ImportError:
+
+        def _rich_escape(s: str) -> str:
+            return s
+
+    safe_pattern = _rich_escape(pattern)
+    header = (
+        f"[error]✗[/error] Refusing catch-all allow pattern '[bold]{safe_pattern}[/bold]': "
+        f"{_rich_escape(reason)}.\n"
+    )
+    if not force:
+        return (
+            header + "Allow patterns bypass ALL built-in and custom dangerous-command checks. "
+            "Narrow the pattern to the specific command you want to exempt.\n"
+            "Pattern not added. (Re-run with --force on an interactive terminal to "
+            "confirm anyway.)\n",
+            1,
+        )
+    if not sys.stdin.isatty():
+        return (
+            header + "--force requires an interactive terminal (stdin is not a TTY). "
+            "Pattern not added.\n",
+            1,
+        )
+    try:
+        answer = input(
+            "This allow pattern will exempt dangerous commands from approval. "
+            "Add it anyway? [y/N]: "
+        )
+    except (EOFError, KeyboardInterrupt):
+        return ("\nCancelled. Pattern not added.\n", 1)
+    if answer.strip().lower() != "y":
+        return ("Pattern not added.\n", 1)
+    return None
 
 
 def _add_noninteractive(
@@ -1371,6 +1432,7 @@ def _add_noninteractive(
     dry_run: bool,
     glob_str: str | None = None,
     target_file: str | None = None,
+    force: bool = False,
 ) -> tuple[str, str, int]:
     """Add a pattern via CLI flags."""
     from .config import append_to_yaml_file, save_config
@@ -1384,6 +1446,12 @@ def _add_noninteractive(
             f"Pattern not added.\n",
             1,
         )
+
+    # Refuse catch-all allow patterns (they disable the approval system).
+    if pattern_type == "allow":
+        refusal = _refuse_catch_all_allow(pattern, force)
+        if refusal is not None:
+            return refusal
 
     section_key = {
         "block": "patterns",
@@ -1831,6 +1899,7 @@ def _handle_add(args: Any) -> None:
         dry_run=getattr(args, "dry_run", False),
         glob_str=getattr(args, "glob", None),
         target_file=getattr(args, "target", None),
+        force=getattr(args, "force", False),
     )
     _emit(output, exit_code)
 
@@ -2241,6 +2310,13 @@ def register_cli(subparser: argparse.ArgumentParser) -> None:
         default=None,
         help="Write to a specific .yaml file in the config directory "
         "(requires directory mode; file must have .yaml extension)",
+    )
+    add_p.add_argument(
+        "-f",
+        "--force",
+        action="store_true",
+        help="For --type allow: ask for y/N confirmation instead of refusing a "
+        "catch-all pattern outright (interactive terminal only)",
     )
     add_p.set_defaults(func=_handle_add)
 

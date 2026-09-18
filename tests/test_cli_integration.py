@@ -185,6 +185,49 @@ class TestFileMode:
         assert len(data.get("deny_patterns", [])) == 1
         assert data["deny_patterns"][0]["description"] == "Danger command"
 
+    def test_add_catch_all_allow_pattern_refused(self, cli_module, hermes_home):
+        """``add --type allow`` refuses catch-all patterns and writes nothing."""
+        _write_yaml(self.yaml_path(hermes_home), _config(SIMPLE_BLOCK_PATTERNS))
+
+        for pat in (".*", "^.+$", "(?s).*"):
+            output, exit_code = cli_module.cmd_add(
+                pattern_type="allow", pattern=pat, description="Allow everything",
+            )
+            assert exit_code == 1, pat
+            assert "refusing catch-all allow pattern" in output.lower()
+
+        data = _read_yaml(self.yaml_path(hermes_home))
+        assert data.get("allow_patterns", []) == []
+
+    def test_add_catch_all_allow_force_requires_tty(self, cli_module, hermes_home, monkeypatch):
+        """--force is ineffective without a TTY; with a TTY it asks y/N."""
+        _write_yaml(self.yaml_path(hermes_home), _config(SIMPLE_BLOCK_PATTERNS))
+
+        monkeypatch.setattr(cli_module.sys.stdin, "isatty", lambda: False)
+        output, exit_code = cli_module.cmd_add(
+            pattern_type="allow", pattern=".*", description="Allow everything", force=True,
+        )
+        assert exit_code == 1
+        assert "interactive terminal" in output.lower()
+        assert _read_yaml(self.yaml_path(hermes_home)).get("allow_patterns", []) == []
+
+        # TTY + explicit "n" -> still refused.
+        monkeypatch.setattr(cli_module.sys.stdin, "isatty", lambda: True)
+        monkeypatch.setattr("builtins.input", lambda *_a, **_k: "n")
+        output, exit_code = cli_module.cmd_add(
+            pattern_type="allow", pattern=".*", description="Allow everything", force=True,
+        )
+        assert exit_code == 1
+        assert _read_yaml(self.yaml_path(hermes_home)).get("allow_patterns", []) == []
+
+        # TTY + explicit "y" -> accepted.
+        monkeypatch.setattr("builtins.input", lambda *_a, **_k: "y")
+        output, exit_code = cli_module.cmd_add(
+            pattern_type="allow", pattern=".*", description="Allow everything", force=True,
+        )
+        assert exit_code == 0
+        assert len(_read_yaml(self.yaml_path(hermes_home)).get("allow_patterns", [])) == 1
+
     # --- remove ---
 
     def test_remove_by_index(self, cli_module, hermes_home):

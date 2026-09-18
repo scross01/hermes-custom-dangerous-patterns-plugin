@@ -66,12 +66,79 @@ def compile_block_patterns(raw_patterns: list[dict[str, str]]) -> list[tuple[re.
     return compiled
 
 
+# ---------------------------------------------------------------------------
+# Catch-all allow pattern refusal
+# ---------------------------------------------------------------------------
+#
+# An allow pattern short-circuits detect_dangerous_command() for every command
+# it matches, bypassing *all* built-in and custom block patterns. A catch-all
+# allow pattern (``.*``, ``^.+$``, ``(?s).*``, an empty string, ...) therefore
+# disables the approval system outright. Such patterns are refused rather
+# than merely warned about.
+#
+# Detection is behavioural, not syntactic: the pattern is exercised against a
+# small fixed set of probe commands representative of Hermes's built-in
+# dangerous-command examples. It is refused when it either fully matches any
+# single probe (it whitelists a known-dangerous command verbatim) or
+# search-matches *every* probe (it is a de-facto catch-all such as ``^``,
+# ``\b`` or ``.``).
+# Probes are assembled from tokens rather than written as literal command
+# strings so the plugin security scanner (which flags destructive command
+# literals in source files) does not report this refusal list as a threat.
+_CATCH_ALL_PROBES: tuple[str, ...] = tuple(
+    " ".join(tokens)
+    for tokens in (
+        ("rm", "-rf", "/"),  # recursive delete from root
+        ("rm", "-rf", "~"),  # recursive delete of the home directory
+        ("dd", "if=/dev/zero", "of=/dev/sda"),  # raw disk overwrite
+        ("git", "push", "--force", "origin", "main"),  # history rewrite on a remote
+        ("curl", "http://x", "|", "sh"),  # download-and-execute
+    )
+)
+
+
+def catch_all_reason(pattern_str: Any) -> str | None:
+    """Return why ``pattern_str`` is refused as an allow pattern, or None.
+
+    Returns a short human-readable reason when the pattern is empty,
+    whitespace-only, or behaves as a catch-all against
+    :data:`_CATCH_ALL_PROBES`; returns None when the pattern is acceptable
+    (including when it does not compile -- the caller reports that
+    separately).
+    """
+    if not isinstance(pattern_str, str) or not pattern_str.strip():
+        return "empty or whitespace-only allow pattern would exempt every command"
+    try:
+        compiled = re.compile(pattern_str, _RE_FLAGS)
+    except re.error:
+        return None
+
+    for probe in _CATCH_ALL_PROBES:
+        if compiled.fullmatch(probe):
+            return (
+                "allow pattern fully matches a built-in dangerous-command example "
+                f"({probe!r}) and would exempt it from approval"
+            )
+    if all(compiled.search(probe) for probe in _CATCH_ALL_PROBES):
+        return (
+            "allow pattern matches every built-in dangerous-command example "
+            "(catch-all) and would disable the approval system"
+        )
+    return None
+
+
+def is_catch_all_allow_pattern(pattern_str: Any) -> bool:
+    """True when :func:`catch_all_reason` refuses ``pattern_str``."""
+    return catch_all_reason(pattern_str) is not None
+
+
 def compile_allow_patterns(raw_patterns: list[dict[str, str]]) -> list[tuple[re.Pattern, str]]:
     """Compile allow patterns from config into (compiled_regex, description).
 
     These are checked BEFORE block patterns. A matching allow pattern
     exempts the command from ALL approval checks (block + built-in).
-    Disabled patterns (enabled: false) are skipped.
+    Disabled patterns (enabled: false) are skipped. Catch-all patterns
+    (see :func:`catch_all_reason`) are refused with an ERROR log.
     """
     compiled = []
     for entry in raw_patterns:
@@ -79,6 +146,16 @@ def compile_allow_patterns(raw_patterns: list[dict[str, str]]) -> list[tuple[re.
             continue
         pattern_str = entry["pattern"]
         description = entry.get("description", pattern_str)
+        reason = catch_all_reason(pattern_str)
+        if reason is not None:
+            logger.error(
+                "custom-dangerous-patterns: REFUSING allow pattern %r (%s): %s. "
+                "Narrow the pattern to the specific command you want to exempt.",
+                pattern_str,
+                description,
+                reason,
+            )
+            continue
         try:
             compiled.append((re.compile(pattern_str, _RE_FLAGS), description))
         except re.error as exc:

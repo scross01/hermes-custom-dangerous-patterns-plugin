@@ -12,8 +12,19 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+
+def _hermes_home() -> Path:
+    """Resolve the Hermes home directory (honours HERMES_HOME when available)."""
+    try:
+        from hermes_constants import get_hermes_home
+
+        return Path(get_hermes_home())
+    except Exception:
+        return Path.home() / ".hermes"
+
+
 # Default Hermes log directory (contains agent.log, errors.log, gateway.log, etc.)
-_DEFAULT_LOG_PATH = Path.home() / ".hermes" / "logs"
+_DEFAULT_LOG_PATH = _hermes_home() / "logs"
 
 # Match log filename (written by logfile.log_match)
 _MATCH_LOG_FILENAME = "custom-dangerous-patterns.log"

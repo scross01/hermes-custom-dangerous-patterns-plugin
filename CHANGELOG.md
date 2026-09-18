@@ -1,5 +1,18 @@
 # Change Log
 
+## Unreleased
+
+- **Security:** refuse catch-all `allow_patterns` (`.*`, `.+`, `^.*$`, `(?s).*`,
+  empty/whitespace-only, or anything matching the built-in dangerous-command
+  examples). Such entries are skipped with an `ERROR` log at YAML load time and
+  rejected by `add --type allow`; `--force` only downgrades the rejection to a
+  y/N confirmation on an interactive terminal, never from a non-TTY.
+- Resolve the match-log directory via Hermes' `get_hermes_home()` (falls back
+  to `~/.hermes`) in `logfile.py` and `logs.py`.
+- README: document that the match log persists the full command text.
+- Remove stray `.coverage`, `package-lock.json`, `skills-lock.json` from the
+  tree and ignore them.
+
 ## 0.4.4
 
 - Added more example rules. Thanks the @gothicserpent for the contribution.

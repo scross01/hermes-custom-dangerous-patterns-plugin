@@ -276,6 +276,8 @@ The plugin tracks the integrity of your configuration across sessions:
 - **Config hash tracking:** A SHA-256 hash of your full config YAML is stored in `~/.hermes/.custom-patterns-hash`. If the config changes between sessions, a `WARNING` is logged with the old and new pattern counts.
 - **Protected patterns:** Patterns with `protected: true` have their individual regex SHA-256 hashed and tracked. If a protected pattern is **modified** or **removed**, a `CRITICAL` security warning is logged at startup.
 - **Allow shadowing detection:** When an allow pattern could bypass a built-in dangerous pattern without a corresponding custom block pattern, a `WARNING` is logged with the details.
+- **Catch-all allow refusal:** Allow patterns that would exempt everything (`.*`, `.+`, `^.*$`, `(?s).*`, empty/whitespace-only) or that match the built-in dangerous-command examples (recursive root deletion, `dd` onto a block device, download-and-execute pipelines) are **refused**: skipped with an `ERROR` log when loading the YAML, and rejected by `hermes custom-dangerous-patterns add --type allow`. Passing `--force` on an interactive terminal downgrades the rejection to an explicit y/N confirmation; it is never accepted from a non-TTY (scripts, agents).
+- **Match log contents:** every allow/block/deny match is appended as JSONL to `~/.hermes/logs/custom-dangerous-patterns.log` **including the full command text** that matched. Treat that file as sensitive if your commands may contain secrets (tokens in URLs, inline passwords, etc.).
 
 These integrity checks provide defense-in-depth against unauthorized config tampering, but they are **detective, not preventive** — the plugin detects and logs changes but does not prevent them. See [Security & Risks](#security--risks) for more on the trust model.
 
@@ -636,13 +638,13 @@ The built-in approval system then handles everything automatically:
 
 > The plugin's stance on self-modification is: **allow it, detect it, log it.**
 
-The agent running Hermes can read and write `~/.hermes/custom-dangerous-patterns.yaml`. This means an agent could add `allow_patterns: [{pattern: '.*'}]` to bypass all approval checks (except hardline commands, which are always blocked). This is by design — the plugin is a safety net, not a jail.
+The agent running Hermes can read and write `~/.hermes/custom-dangerous-patterns.yaml`. This means an agent could edit allow patterns to bypass approval checks (except hardline commands, which are always blocked). Catch-all allow patterns such as `allow_patterns: [{pattern: '.*'}]` are refused at load time, but the trust model is otherwise by design — the plugin is a safety net, not a jail.
 
 The `_config_cache` freeze means mid-session edits are ignored, but changes take effect after the next Hermes restart.
 
 ### Risks the plugin cannot prevent
 
-- An agent could add `allow_patterns: [{pattern: '.*'}]` to exempt itself from all dangerous-pattern checks
+- An agent could add a broad (but not catch-all) allow pattern to exempt itself from a wide range of dangerous-pattern checks. Literal catch-alls such as `allow_patterns: [{pattern: '.*'}]` are refused at load time, but a sufficiently broad hand-crafted regex still only triggers the shadowing `WARNING`
 - An agent could modify protected patterns — changing both the pattern and its `protected` flag
 - Config modifications via Python I/O or AI tool calls are invisible to pattern matching. Only literal command-line path references to the config file are potentially caught by patterns
 

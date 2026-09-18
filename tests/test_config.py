@@ -959,3 +959,28 @@ def test_resolve_config_path_combined_mode(tmp_path, monkeypatch):
     result = _resolve_config_path()
     # In combined mode, directory is returned so writes go to 99-custom.yaml
     assert result == tmp_path / "custom-dangerous-patterns"
+
+
+def test_validate_config_refuses_catch_all_allow_pattern(caplog):
+    """A catch-all allow pattern is skipped at YAML load time with an ERROR log."""
+    import logging
+
+    from config import _validate_config
+
+    raw = {
+        "allow_patterns": [
+            {"pattern": ".*", "description": "Allow everything"},
+            {"pattern": "", "description": "Blank"},
+            {"pattern": r"\bvultr\s+account\s+info\b", "description": "Vultr info"},
+        ],
+        # Catch-all block/deny patterns are still permitted -- only allow is refused.
+        "deny_patterns": [{"pattern": ".*", "description": "Deny everything"}],
+    }
+    with caplog.at_level(logging.ERROR, logger="config"):
+        result = _validate_config(raw)
+    assert [e["description"] for e in result["allow_patterns"]] == ["Vultr info"]
+    assert len(result["deny_patterns"]) == 1
+    assert any(
+        rec.levelno == logging.ERROR and "REFUSING catch-all allow pattern" in rec.getMessage()
+        for rec in caplog.records
+    )
