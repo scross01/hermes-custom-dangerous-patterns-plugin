@@ -984,3 +984,30 @@ def test_validate_config_refuses_catch_all_allow_pattern(caplog):
         rec.levelno == logging.ERROR and "REFUSING catch-all allow pattern" in rec.getMessage()
         for rec in caplog.records
     )
+
+
+def test_validate_config_catch_all_allow_disabled_entry_is_kept(caplog):
+    """A disabled catch-all allow entry is inert, so it stays visible to list/remove/enable."""
+    import logging
+
+    from config import _validate_config
+
+    raw = {"allow_patterns": [{"pattern": ".*", "description": "Paused", "enabled": False}]}
+    with caplog.at_level(logging.ERROR, logger="config"):
+        result = _validate_config(raw)
+    assert [e["description"] for e in result["allow_patterns"]] == ["Paused"]
+    assert result["allow_patterns"][0]["enabled"] is False
+    assert not any("REFUSING" in rec.getMessage() for rec in caplog.records)
+
+
+def test_validate_config_refuses_whitespace_padded_catch_all_allow(caplog):
+    """The check runs on the stripped pattern (what is stored and compiled)."""
+    import logging
+
+    from config import _validate_config
+
+    raw = {"allow_patterns": [{"pattern": ".*  ", "description": "Padded"}]}
+    with caplog.at_level(logging.ERROR, logger="config"):
+        result = _validate_config(raw)
+    assert result["allow_patterns"] == []
+    assert any("REFUSING catch-all allow pattern" in rec.getMessage() for rec in caplog.records)

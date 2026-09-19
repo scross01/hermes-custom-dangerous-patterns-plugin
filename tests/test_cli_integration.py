@@ -199,34 +199,21 @@ class TestFileMode:
         data = _read_yaml(self.yaml_path(hermes_home))
         assert data.get("allow_patterns", []) == []
 
-    def test_add_catch_all_allow_force_requires_tty(self, cli_module, hermes_home, monkeypatch):
-        """--force is ineffective without a TTY; with a TTY it asks y/N."""
+    def test_add_catch_all_allow_has_no_override(self, cli_module, hermes_home, monkeypatch):
+        """No prompt and no flag can write a catch-all allow entry (it would be dead on load)."""
         _write_yaml(self.yaml_path(hermes_home), _config(SIMPLE_BLOCK_PATTERNS))
 
-        monkeypatch.setattr(cli_module.sys.stdin, "isatty", lambda: False)
-        output, exit_code = cli_module.cmd_add(
-            pattern_type="allow", pattern=".*", description="Allow everything", force=True,
-        )
-        assert exit_code == 1
-        assert "interactive terminal" in output.lower()
-        assert _read_yaml(self.yaml_path(hermes_home)).get("allow_patterns", []) == []
-
-        # TTY + explicit "n" -> still refused.
         monkeypatch.setattr(cli_module.sys.stdin, "isatty", lambda: True)
-        monkeypatch.setattr("builtins.input", lambda *_a, **_k: "n")
-        output, exit_code = cli_module.cmd_add(
-            pattern_type="allow", pattern=".*", description="Allow everything", force=True,
-        )
-        assert exit_code == 1
-        assert _read_yaml(self.yaml_path(hermes_home)).get("allow_patterns", []) == []
-
-        # TTY + explicit "y" -> accepted.
         monkeypatch.setattr("builtins.input", lambda *_a, **_k: "y")
-        output, exit_code = cli_module.cmd_add(
-            pattern_type="allow", pattern=".*", description="Allow everything", force=True,
-        )
-        assert exit_code == 0
-        assert len(_read_yaml(self.yaml_path(hermes_home)).get("allow_patterns", [])) == 1
+        for pattern in (".*", r"\S+", "git|curl|dd|rm"):
+            output, exit_code = cli_module.cmd_add(
+                pattern_type="allow", pattern=pattern, description="Allow everything",
+            )
+            assert exit_code == 1, pattern
+            assert "refusing catch-all allow pattern" in output.lower()
+            assert "no effect" in output.lower()
+            assert _read_yaml(self.yaml_path(hermes_home)).get("allow_patterns", []) == []
+        assert cli_module._refuse_catch_all_allow(r"\bvultr\s+account\s+info\b") is None
 
     # --- remove ---
 

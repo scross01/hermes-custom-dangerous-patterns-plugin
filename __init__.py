@@ -506,9 +506,12 @@ def _check_allow_shadowing(config: dict, is_allow_pattern) -> None:
 
     from tools.approval_detection import DANGEROUS_PATTERNS_COMPILED
 
-    from .patterns import compile_allow_patterns, find_uncovered_allow_shadowing
+    from . import patterns as _patterns
+    from .patterns import find_uncovered_allow_shadowing
 
-    allow_compiled = compile_allow_patterns(config.get("allow_patterns", []))
+    # Reuse the list compile_all() already built (same config) so a refused
+    # catch-all is logged once per startup, not once per compile.
+    allow_compiled = _patterns._allow_compiled
     block_raw = config.get("patterns", [])
     block_compiled: list[re.Pattern] = []
     for entry in block_raw:
