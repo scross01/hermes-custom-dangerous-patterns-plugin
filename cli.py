@@ -1424,7 +1424,14 @@ def _add_noninteractive(
         )
 
     # Refuse catch-all allow patterns (they disable the approval system).
+    # Normalize once for allow patterns: the loader stores pattern.strip(),
+    # and catch_all_reason on an unstripped pattern can return None (e.g.
+    # '.*  ' or ' ^.*$' dodge the probes), so the gate must see the stripped
+    # form and the stored YAML key must agree with the loader's
+    # normalization — otherwise add writes a dead entry the CLI cannot
+    # even list.
     if pattern_type == "allow":
+        pattern = pattern.strip()
         refusal = _refuse_catch_all_allow(pattern)
         if refusal is not None:
             return refusal
