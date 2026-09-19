@@ -185,6 +185,69 @@ class TestFileMode:
         assert len(data.get("deny_patterns", [])) == 1
         assert data["deny_patterns"][0]["description"] == "Danger command"
 
+    def test_add_catch_all_allow_pattern_refused(self, cli_module, hermes_home):
+        """``add --type allow`` refuses catch-all patterns and writes nothing."""
+        _write_yaml(self.yaml_path(hermes_home), _config(SIMPLE_BLOCK_PATTERNS))
+
+        for pat in (".*", "^.+$", "(?s).*"):
+            output, exit_code = cli_module.cmd_add(
+                pattern_type="allow", pattern=pat, description="Allow everything",
+            )
+            assert exit_code == 1, pat
+            assert "refusing catch-all allow pattern" in output.lower()
+
+        data = _read_yaml(self.yaml_path(hermes_home))
+        assert data.get("allow_patterns", []) == []
+
+    def test_add_catch_all_allow_has_no_override(self, cli_module, hermes_home, monkeypatch):
+        """No prompt and no flag can write a catch-all allow entry (it would be dead on load)."""
+        _write_yaml(self.yaml_path(hermes_home), _config(SIMPLE_BLOCK_PATTERNS))
+
+        monkeypatch.setattr(cli_module.sys.stdin, "isatty", lambda: True)
+        monkeypatch.setattr("builtins.input", lambda *_a, **_k: "y")
+        for pattern in (".*", r"\S+", "git|curl|dd|rm"):
+            output, exit_code = cli_module.cmd_add(
+                pattern_type="allow", pattern=pattern, description="Allow everything",
+            )
+            assert exit_code == 1, pattern
+            assert "refusing catch-all allow pattern" in output.lower()
+            assert "no effect" in output.lower()
+            assert _read_yaml(self.yaml_path(hermes_home)).get("allow_patterns", []) == []
+        assert cli_module._refuse_catch_all_allow(r"\bvultr\s+account\s+info\b") is None
+
+    def test_add_padded_catch_all_allow_refused(self, cli_module, hermes_home):
+        """Whitespace-padded catch-alls cannot dodge the CLI gate (kilo round 2).
+
+        catch_all_reason on the raw value returns None for these (no probe
+        has two consecutive spaces; a leading space breaks fullmatch), so
+        without the strip the CLI would write a dead entry that the loader
+        refuses on next startup and that list/remove cannot see.
+        """
+        _write_yaml(self.yaml_path(hermes_home), _config(SIMPLE_BLOCK_PATTERNS))
+
+        for pattern in (".*  ", " ^.*$", "\\s*\\S+\\s*"):
+            output, exit_code = cli_module.cmd_add(
+                pattern_type="allow", pattern=pattern, description="Padded allow",
+            )
+            assert exit_code == 1, repr(pattern)
+            assert "refusing catch-all allow pattern" in output.lower()
+            assert _read_yaml(self.yaml_path(hermes_home)).get("allow_patterns", []) == []
+
+    def test_add_allow_pattern_stores_stripped(self, cli_module, hermes_home):
+        """Allow patterns are stored stripped, matching the loader's normalization."""
+        _write_yaml(self.yaml_path(hermes_home), _config(SIMPLE_BLOCK_PATTERNS))
+
+        output, exit_code = cli_module.cmd_add(
+            pattern_type="allow", pattern="  \\bvultr\\s+info\\b  ",
+            description="Vultr info padded",
+        )
+        assert exit_code == 0, output
+
+        data = _read_yaml(self.yaml_path(hermes_home))
+        entries = data.get("allow_patterns", [])
+        assert len(entries) == 1
+        assert entries[0]["pattern"] == r"\bvultr\s+info\b"
+
     # --- remove ---
 
     def test_remove_by_index(self, cli_module, hermes_home):

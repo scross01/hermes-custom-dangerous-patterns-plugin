@@ -274,6 +274,29 @@ def _validate_pattern(entry: Any, index: int, field: str) -> dict[str, str] | No
         )
         return None
 
+    # Refuse catch-all allow patterns at load time (the runtime path). Only
+    # enabled entries are refused: a disabled catch-all is inert (compile
+    # skips it before the check), and dropping it here would hide it from
+    # ``list``/``remove``/``enable``. Check the stripped value, which is
+    # what gets stored and compiled.
+    if field == "allow_patterns" and entry.get("enabled", True) is not False:
+        try:
+            from .patterns import catch_all_reason
+        except ImportError:
+            from patterns import catch_all_reason  # type: ignore[import-untyped]
+
+        reason = catch_all_reason(pattern.strip())
+        if reason is not None:
+            logger.error(
+                "custom-dangerous-patterns: %s[%d] REFUSING catch-all allow pattern %r: "
+                "%s — skipping. Narrow the pattern to the specific command you want to exempt.",
+                field,
+                index,
+                pattern,
+                reason,
+            )
+            return None
+
     description = entry.get("description", "")
     if not isinstance(description, str):
         description = str(description)

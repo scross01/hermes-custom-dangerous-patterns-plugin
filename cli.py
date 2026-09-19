@@ -1108,6 +1108,11 @@ def cmd_add(
     With no arguments, launches interactive entry automatically.
     Use --target FILENAME to write to a specific YAML file in the config
     directory (requires directory mode; file extension must be .yaml).
+
+    Catch-all allow patterns (``.*``, ``^.+$``, empty, or anything that
+    matches every built-in dangerous-command example) are refused
+    unconditionally -- the config loader and the runtime refuse them too,
+    so there is no flag to override the refusal.
     """
     from .config import load_config, resolve_config_path
     from .patterns import glob_to_regex
@@ -1358,6 +1363,39 @@ def _add_interactive(
     )
 
 
+def _refuse_catch_all_allow(pattern: str) -> tuple[str, int] | None:
+    """Refuse a catch-all allow pattern; return ``(output, exit_code)`` or None.
+
+    The refusal is unconditional: ``config._validate_pattern`` drops such an
+    entry at every load and ``patterns.compile_allow_patterns`` refuses it
+    again at compile time, so writing it to YAML could only ever produce a
+    dead entry that the CLI's ``list``/``remove`` would not even show.
+    """
+    from .patterns import catch_all_reason
+
+    reason = catch_all_reason(pattern)
+    if reason is None:
+        return None
+
+    try:
+        from rich.markup import escape as _rich_escape
+    except ImportError:
+
+        def _rich_escape(s: str) -> str:
+            return s
+
+    safe_pattern = _rich_escape(pattern)
+    return (
+        f"[error]✗[/error] Refusing catch-all allow pattern '[bold]{safe_pattern}[/bold]': "
+        f"{_rich_escape(reason)}.\n"
+        "Allow patterns bypass ALL built-in and custom dangerous-command checks, and "
+        "the plugin refuses this pattern at load time as well, so adding it would have "
+        "no effect. Narrow the pattern to the specific command you want to exempt.\n"
+        "Pattern not added.\n",
+        1,
+    )
+
+
 def _add_noninteractive(
     config: dict[str, Any],
     config_path: Path,
@@ -1384,6 +1422,19 @@ def _add_noninteractive(
             f"Pattern not added.\n",
             1,
         )
+
+    # Refuse catch-all allow patterns (they disable the approval system).
+    # Normalize once for allow patterns: the loader stores pattern.strip(),
+    # and catch_all_reason on an unstripped pattern can return None (e.g.
+    # '.*  ' or ' ^.*$' dodge the probes), so the gate must see the stripped
+    # form and the stored YAML key must agree with the loader's
+    # normalization — otherwise add writes a dead entry the CLI cannot
+    # even list.
+    if pattern_type == "allow":
+        pattern = pattern.strip()
+        refusal = _refuse_catch_all_allow(pattern)
+        if refusal is not None:
+            return refusal
 
     section_key = {
         "block": "patterns",

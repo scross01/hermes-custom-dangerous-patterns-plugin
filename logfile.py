@@ -20,7 +20,18 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-_LOG_DIR = Path.home() / ".hermes" / "logs"
+
+def _hermes_home() -> Path:
+    """Resolve the Hermes home directory (honours HERMES_HOME when available)."""
+    try:
+        from hermes_constants import get_hermes_home
+
+        return Path(get_hermes_home())
+    except Exception:
+        return Path.home() / ".hermes"
+
+
+_LOG_DIR = _hermes_home() / "logs"
 _LOG_FILE = _LOG_DIR / "custom-dangerous-patterns.log"
 _MAX_LOG_BYTES = 10 * 1024 * 1024  # 10 MB
 
