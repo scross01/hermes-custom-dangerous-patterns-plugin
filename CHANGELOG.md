@@ -1,6 +1,6 @@
 # Change Log
 
-## Unreleased
+## 0.4.5
 
 - **Security:** refuse catch-all `allow_patterns` (`.*`, `.+`, `^.*$`, `(?s).*`,
   empty/whitespace-only, or anything matching the built-in dangerous-command
