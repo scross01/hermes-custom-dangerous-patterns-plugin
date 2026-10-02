@@ -74,7 +74,11 @@ def _regexes_suspect_overlap(a: str, b: str) -> bool:
     token is far too weak: on the patterns this plugin ships, "any shared token"
     fired on 27 of 47 examples, pairing things like `brew install` with
     "stop/restart hermes launchd service" over the token `remove`. Requiring a
-    shared bigram drops that to 9 and keeps the pairings plausible.
+    shared bigram drops that to 3 and keeps the pairings plausible.
+
+    Both figures are measured against the real built-in table over
+    ``examples/*.yaml``; ``tests/test_overlap.py`` asserts the 3 so the number
+    here cannot drift away from the shipped behaviour.
 
     This remains a heuristic. Two spellings of the same rule can share no bigram
     at all, so a real overlap can be missed -- which is why the enforcement-time

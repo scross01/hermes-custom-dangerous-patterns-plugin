@@ -330,10 +330,17 @@ def test_cmd_test_no_patterns(monkeypatch, cli_module, tmp_path):
         "get_block_patterns",
         lambda: [],
     )
+    # A readable-but-empty built-in table is what "no built-ins matched" means.
+    # Without this the table is UNREADABLE here, and PASS would be an overclaim
+    # -- the distinction this test previously got wrong.
+    monkeypatch.setattr(
+        cli_module, "_check_builtins_for_test", lambda command, verbose: []
+    )
 
     output, exit_code = cli_module.cmd_test("echo hello")
     assert exit_code == 0
     assert "PASS" in output
+    assert "UNKNOWN" not in output
 
 
 def test_cmd_test_deny_match(monkeypatch, cli_module, tmp_path):
@@ -997,3 +1004,100 @@ def test_config_content_files_directory_with_sibling(cli_module, tmp_path):
     sibling.write_text("", encoding="utf-8")
     files = cli_module._config_content_files(d)
     assert a in files and sibling in files
+def _wire_cmd_test(monkeypatch, cli_module, block_pattern=r"\bvultr\b"):
+    """Standard cmd_test wiring: one block rule, no allow/deny, fresh config."""
+    import re as _re
+
+    monkeypatch.setattr(
+        sys.modules["hermes_plugins.config"],
+        "load_config",
+        lambda force=False, integrity_check=True: {
+            "patterns": [],
+            "allow_patterns": [],
+            "deny_patterns": [],
+        },
+    )
+    monkeypatch.setattr(sys.modules["hermes_plugins.patterns"], "compile_all",
+                        lambda config: None)
+    monkeypatch.setattr(sys.modules["hermes_plugins.patterns"], "is_deny_pattern",
+                        lambda cmd: None)
+    monkeypatch.setattr(sys.modules["hermes_plugins.patterns"], "is_allow_pattern",
+                        lambda cmd: None)
+    compiled = _re.compile(block_pattern, _re.IGNORECASE | _re.DOTALL)
+    monkeypatch.setattr(sys.modules["hermes_plugins.patterns"], "get_block_patterns",
+                        lambda: [(compiled, "Vultr CLI")])
+
+
+def test_cmd_test_reports_unknown_when_builtins_unreadable(
+    monkeypatch, cli_module, tmp_path
+):
+    """Cannot-ask must never be rendered as PASS.
+
+    `_check_builtins_for_test()` returns None when Hermes's table cannot be
+    read. Collapsing that into "no match" made `test 'rm -rf /'` report
+    "no patterns matched. Command would run normally" outside Hermes -- an
+    overclaim, in the unsafe direction, directly contradicting the line the same
+    output printed three lines earlier.
+    """
+    _wire_cmd_test(monkeypatch, cli_module, block_pattern=r"\bnothing-matches-this\b")
+    monkeypatch.setattr(cli_module, "_check_builtins_for_test",
+                        lambda command, verbose: None)
+
+    output, _rc = cli_module.cmd_test("rm -rf /")
+
+    assert "UNKNOWN" in output
+    assert "no patterns matched" not in output, (
+        "must not claim PASS when the built-in table could not be read"
+    )
+    assert "built-in patterns unavailable" in output
+
+
+def test_cmd_test_still_reports_block_match_without_builtins(
+    monkeypatch, cli_module, tmp_path
+):
+    """A custom match is still knowable when the built-ins are unreadable."""
+    _wire_cmd_test(monkeypatch, cli_module)
+    monkeypatch.setattr(cli_module, "_check_builtins_for_test",
+                        lambda command, verbose: None)
+
+    output, _rc = cli_module.cmd_test("vultr instance delete")
+
+    assert "APPROVAL PROMPT" in output
+    assert "UNKNOWN" not in output
+
+
+def test_cmd_test_skip_builtins_still_reports_pass(monkeypatch, cli_module, tmp_path):
+    """Opting out of built-ins makes PASS legitimate.
+
+    `--skip-builtins` means the user asked for a custom-patterns-only answer, so
+    UNKNOWN would be wrong there: we answered exactly what was asked, and never
+    claimed to have consulted the built-ins.
+    """
+    _wire_cmd_test(monkeypatch, cli_module, block_pattern=r"\bnothing-matches-this\b")
+    monkeypatch.setattr(cli_module, "_check_builtins_for_test",
+                        lambda command, verbose: ["Recursive delete"])
+
+    output, _rc = cli_module.cmd_test("echo hi", skip_builtins=True)
+
+    assert "PASS" in output
+    assert "UNKNOWN" not in output
+
+
+def test_cmd_test_consults_builtins_once(monkeypatch, cli_module, tmp_path):
+    """Step 4 and the verdict share one result.
+
+    Recomputing it for the verdict meant the displayed matches and the verdict
+    came from two separate calls, so they could disagree.
+    """
+    calls = []
+
+    def fake(command, verbose):
+        calls.append(verbose)
+        return ["Recursive delete"]
+
+    _wire_cmd_test(monkeypatch, cli_module, block_pattern=r"\bnothing-matches-this\b")
+    monkeypatch.setattr(cli_module, "_check_builtins_for_test", fake)
+
+    cli_module.cmd_test("rm -rf /")
+
+    assert len(calls) == 1, f"built-ins consulted {len(calls)} times"

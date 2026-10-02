@@ -19,7 +19,9 @@ Hermes loads plugins as `hermes_plugins.<slug>` packages. Absolute imports again
 
 ### Config is cached at startup, never re-read
 
-`config.py` has a module-level `_config_cache`. Calling `load_config()` a second time returns the cached dict. The `force=True` parameter exists **only** for testing — mid-session config edits are silently ignored.### Never write to Hermes core — including its tables
+`config.py` has a module-level `_config_cache`. Calling `load_config()` a second time returns the cached dict. The `force=True` parameter exists **only** for testing — mid-session config edits are silently ignored.
+
+### Never write to Hermes core — including its tables
 
 The plugin extends Hermes **only** through `pre_tool_call`, a `register_*` API, and
 its CLI. Two things are forbidden:

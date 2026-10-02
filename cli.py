@@ -249,10 +249,20 @@ def cmd_test(
     else:
         lines.append(subheading("3. BLOCK Patterns — [dim]skipped (deny already matched)[/dim]"))
 
-    # Step 4: Built-in patterns
+    # Step 4: Built-in patterns.
+    #
+    # Resolved ONCE and reused by the verdict. `None` means Hermes's table
+    # could not be read at all -- which is NOT "no built-ins matched", and must
+    # never be collapsed into one. Outside Hermes the old `or []` did exactly
+    # that, so `test 'rm -rf /'` printed "built-in patterns unavailable" and
+    # then reported PASS: an overclaim, in the unsafe direction.
+    builtin_matches = None if skip_builtins else _check_builtins_for_test(command, verbose)
+    # Distinguish "user opted out of built-ins" (PASS is then legitimate) from
+    # "Hermes's table could not be read" (PASS would be an overclaim).
+    builtins_unavailable = not skip_builtins and builtin_matches is None
+
     if not skip_builtins:
         lines.append(subheading("4. BUILT-IN Patterns — checked alongside block patterns"))
-        builtin_matches = _check_builtins_for_test(command, verbose)
         if builtin_matches is None:
             lines.append(muted("  (built-in patterns unavailable — run inside Hermes)"))
         elif builtin_matches:
@@ -275,9 +285,7 @@ def cmd_test(
                 "red",
             )
         )
-    elif block_matches or (
-        not skip_builtins and (_check_builtins_for_test(command, False) or [])
-    ):
+    elif block_matches or builtin_matches:
         lines.append(
             result_panel(
                 "APPROVAL PROMPT",
@@ -288,6 +296,18 @@ def cmd_test(
                     if deferred
                     else "user will see (o)nce/(s)ession/(a)lways/(d)eny"
                 ),
+                "yellow",
+            )
+        )
+    elif builtins_unavailable:
+        # Built-ins were in scope but could not be read. Saying PASS here would
+        # assert we checked and found nothing, when we never managed to look.
+        lines.append(
+            result_panel(
+                "UNKNOWN",
+                "custom patterns did not match, but Hermes's built-in patterns "
+                "could not be read, so this command's real outcome is undetermined. "
+                "Re-run inside Hermes.",
                 "yellow",
             )
         )

@@ -430,7 +430,9 @@ hermes custom-dangerous-patterns test "vultr account info" --verbose
 hermes custom-dangerous-patterns test "git push --force" --skip-builtins
 ```
 
-Shows which patterns match and the result: **DENY** (blocked immediately), **APPROVAL PROMPT** (interactive prompt), or **PASS** (no patterns matched). Retired `allow_patterns` are listed for visibility but are never counted toward the verdict — such a command is not exempt. If one matches, the output ends with an explicit "This command is NOT exempt" note.
+Shows which patterns match and the result: **DENY** (blocked immediately), **APPROVAL PROMPT** (interactive prompt), **PASS** (no patterns matched), or **UNKNOWN** (no custom match, but Hermes's built-in patterns could not be read — run inside Hermes). `UNKNOWN` exists so that failing to read the built-in table is never reported as "nothing matched": that would be an overclaim.
+
+Retired `allow_patterns` are listed for visibility but are never counted toward the verdict — such a command is not exempt. If one matches, the output ends with an explicit "This command is NOT exempt" note.
 
 `--verbose` shows full pattern regex and built-in matches. `--skip-builtins` omits Hermes's built-in patterns to focus on custom patterns.
 
