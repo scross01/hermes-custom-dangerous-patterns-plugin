@@ -1,7 +1,11 @@
-"""Pattern compilation and allow-pattern matching.
+"""Pattern compilation and command matching.
 
-Compiles raw config patterns into (compiled_regex, description) tuples
-and provides the allow-pattern check used by the monkey-patch.
+Compiles raw config patterns into (compiled_regex, description) tuples and
+provides the matchers the pre_tool_call hook uses: find_block_match,
+find_deny_match, and is_deny_pattern.
+
+Allow patterns were retired in 034 -- no supported Hermes surface can express
+"do not apply a gate" -- so this module no longer compiles any.
 """
 
 from __future__ import annotations
@@ -134,7 +138,15 @@ def builtin_overlap_report() -> list[tuple[str, str]]:
 def compile_block_patterns(raw_patterns: list[dict[str, str]]) -> list[tuple[re.Pattern, str]]:
     """Compile block patterns from config into (compiled_regex, description).
 
-    These get appended to DANGEROUS_PATTERNS / DANGEROUS_PATTERNS_COMPILED.
+    These stay INSIDE this plugin and are matched by find_block_match(). They
+    are deliberately NOT appended to DANGEROUS_PATTERNS /
+    DANGEROUS_PATTERNS_COMPILED: writing to those Hermes-owned tables is
+    forbidden by the catalog rules and by AGENTS.md, and `hermes plugins
+    validate` does not detect it (see tests/test_core_surface.py, which is the
+    real gate). Matching is done here so the hook can escalate to
+    `{"action": "approve", "rule_key": ...}` under the command normalization
+    Hermes itself uses, rather than injecting a match into Hermes's matcher.
+
     Invalid regexes are logged and skipped. Disabled patterns (enabled: false)
     are skipped without warning — they're intentionally paused.
     """

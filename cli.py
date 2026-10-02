@@ -451,7 +451,15 @@ def _write_init_yaml(config_dict: dict[str, Any], target: Path) -> None:
 
 
 def _build_minimal_starter_config() -> dict[str, Any]:
-    """Build a minimal starter config with [TEST] patterns only."""
+    """Build a minimal starter config with [TEST] patterns only.
+
+    Deliberately ships NO allow_patterns entry. Allow patterns were retired in
+    034, and allow_pattern_retirement_notice() fires on ANY allow entry --
+    disabled included, because an inert entry still misleads whoever reads the
+    config. Since __init__.py logs that notice at CRITICAL, seeding one here
+    meant a brand-new `init` immediately emitted the upgrading-user warning
+    about its own config. An empty/absent key is the honest starter state.
+    """
     return {
         "patterns": [
             {
@@ -461,14 +469,7 @@ def _build_minimal_starter_config() -> dict[str, Any]:
                 "group": "testing",
             },
         ],
-        "allow_patterns": [
-            {
-                "pattern": r"\becho\s+allow\b",
-                "description": "[TEST] Allow echo allow",
-                "enabled": False,
-                "group": "testing",
-            },
-        ],
+        "allow_patterns": [],
         "deny_patterns": [
             {
                 "pattern": r"\becho\s+deny\b",
@@ -727,7 +728,11 @@ def _toggle_interactive(
     }
     section_labels = {
         "patterns": "BLOCK",
-        "allow_patterns": "ALLOW",
+        # Allow patterns are retired (034): the entries may still exist on disk
+        # but are INERT. Say so here, exactly as `list` (INERT), the add menu
+        # ("Allow (retired)") and `test` do -- otherwise a user can enable an
+        # inert entry from this menu without being told nothing enforces it.
+        "allow_patterns": "ALLOW (retired, inert)",
         "deny_patterns": "DENY",
     }
 
@@ -1630,7 +1635,9 @@ def _remove_interactive(
     }
     section_labels = {
         "patterns": "BLOCK",
-        "allow_patterns": "ALLOW",
+        # Same retired marker as _toggle_interactive: removing an inert entry is
+        # still useful, but the menu must not imply allow patterns do anything.
+        "allow_patterns": "ALLOW (retired, inert)",
         "deny_patterns": "DENY",
     }
 

@@ -740,14 +740,43 @@ def test_build_minimal_starter_config(cli_module):
     assert "allow_patterns" in config
     assert "deny_patterns" in config
     assert len(config["patterns"]) == 1
-    assert len(config["allow_patterns"]) == 1
     assert len(config["deny_patterns"]) == 1
+    # NO allow entry: allow patterns were retired (034). See
+    # test_starter_config_does_not_trip_allow_retirement_notice.
+    assert config["allow_patterns"] == []
     # All patterns should be disabled
     for entry in config["patterns"]:
         assert entry["enabled"] is False
     assert all(p["group"] == "testing" for p in config["patterns"])
-    assert all(p["group"] == "testing" for p in config["allow_patterns"])
     assert all(p["group"] == "testing" for p in config["deny_patterns"])
+
+
+def test_starter_config_does_not_trip_allow_retirement_notice(
+    cli_module, monkeypatch, tmp_path
+):
+    """A brand-new `init` must not emit the CRITICAL allow-retirement notice.
+
+    allow_pattern_retirement_notice() fires on ANY allow entry -- disabled
+    included, since an inert entry still misleads whoever reads the config --
+    and __init__.py logs it at CRITICAL. Seeding one in the starter config meant
+    a fresh install immediately produced the upgrading-user warning about its
+    own freshly written file. Verified end to end through init's real writer and
+    config loader, so this cannot regress behind a mock.
+    """
+    config_mod = sys.modules["hermes_plugins.config"]
+
+    target = tmp_path / "custom-dangerous-patterns.yaml"
+    monkeypatch.setenv("HERMES_CUSTOM_PATTERNS_PATH", str(target))
+    monkeypatch.setattr(config_mod, "_config_cache", None)
+
+    cli_module._write_init_yaml(cli_module._build_minimal_starter_config(), target)
+
+    # The written file itself must carry no allow section at all.
+    assert "allow_patterns" not in target.read_text(encoding="utf-8")
+
+    loaded = config_mod.load_config(force=True, integrity_check=False)
+    assert loaded["allow_patterns"] == []
+    assert config_mod.allow_pattern_retirement_notice(loaded, target) is None
 
 
 # ---------------------------------------------------------------------------
