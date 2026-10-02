@@ -71,14 +71,18 @@ def _regexes_suspect_overlap(a: str, b: str) -> bool:
     """Heuristic: two regex SOURCES plausibly match the same commands.
 
     Compares ADJACENT token pairs rather than any shared token. A single shared
-    token is far too weak: on the patterns this plugin ships, "any shared token"
-    fired on 27 of 47 examples, pairing things like `brew install` with
-    "stop/restart hermes launchd service" over the token `remove`. Requiring a
-    shared bigram drops that to 3 and keeps the pairings plausible.
+    token is far too weak: measured against Hermes's real built-in table over
+    ``examples/*.yaml``, "any shared token" fired on 29 of 48 shipped examples,
+    pairing things like `brew install` with "stop/restart hermes launchd
+    service" over the token `remove`. Requiring a shared bigram drops that to 3
+    and keeps the pairings plausible.
 
-    Both figures are measured against the real built-in table over
-    ``examples/*.yaml``; ``tests/test_overlap.py`` asserts the 3 so the number
-    here cannot drift away from the shipped behaviour.
+    Both figures are measured against the real table.
+    ``tests/test_overlap.py`` replays them against a verbatim 6-entry subset of
+    it (``tests/fixtures/builtin_overlap_corpus.yaml``), which reproduces the
+    same 3 and pins it as a two-sided bound (at most 3, at least 2) so the
+    number here cannot drift away from the shipped behaviour in either
+    direction.
 
     This remains a heuristic. Two spellings of the same rule can share no bigram
     at all, so a real overlap can be missed -- which is why the enforcement-time

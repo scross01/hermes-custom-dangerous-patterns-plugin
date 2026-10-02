@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import sys
 import types
+from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
@@ -290,7 +291,7 @@ def test_read_match_log_entries_renders_deferred(logfile_mod):
 def test_overlap_ignores_a_single_generic_shared_token(init_register):
     """One generic token must not make two unrelated patterns "overlap".
 
-    The shipped examples produced 27 startup warnings out of 47 patterns,
+    The shipped examples produced 29 startup warnings out of 48 patterns,
     pairing e.g. `brew install/uninstall/remove` with "stop/restart hermes
     launchd service" over the single token `remove`. Requiring a shared
     adjacent token pair drops that to 3 and keeps the pairings plausible.
@@ -338,22 +339,12 @@ def test_normalized_tokens_strip_regex_syntax(init_register):
     )
 
 
-def test_shipped_examples_produce_few_overlap_warnings(init_register, fake_detector):
-    """Regression guard against the startup warning becoming noise again.
-
-    Measured against the real built-in table, the shipped example configs used
-    to emit 27 warnings; this keeps them at a handful.
-    """
-    from pathlib import Path
-
+def _shipped_example_patterns(p):
+    """Every pattern the plugin ships in examples/, glob entries resolved."""
     import yaml
-    from tools.approval_detection import DANGEROUS_PATTERNS
 
     plugin_dir = Path(__file__).resolve().parent.parent
-    p = init_register.patterns
-
-    total = 0
-    warned = 0
+    out = []
     for f in sorted((plugin_dir / "examples").glob("*.yaml")):
         data = yaml.safe_load(f.read_text(encoding="utf-8")) or {}
         entries = []
@@ -365,15 +356,93 @@ def test_shipped_examples_produce_few_overlap_warnings(init_register, fake_detec
                 e["pattern"] = p.glob_to_regex(e["glob"])
             if e.get("pattern"):
                 entries.append(e)
-        if not entries:
-            continue
+        if entries:
+            out.append((f.name, entries))
+    return out
+
+
+def test_shipped_examples_produce_few_overlap_warnings(init_register, fake_detector):
+    """Regression guard against the startup warning becoming noise again.
+
+    Measured against the real built-in table, the shipped example configs
+    emitted 29 warnings before bigrams were required; the measured figure is
+    now 3 of 48. Both ends are pinned deliberately:
+
+    * the upper bound stops the warning from drifting back toward noise, and
+    * the lower bound stops the matcher from silently degenerating into
+      "never fires" -- which would satisfy an upper bound alone.
+
+    The corpus is fixtures/builtin_overlap_corpus.yaml, a verbatim subset of
+    Hermes's table (6 of 107 entries) that reproduces this exact 3 while
+    keeping the previously-noisy false-positive sources in play. It is NOT the
+    one-entry ``fake_detector`` stub: measuring noise needs a table with
+    enough entries for noise to be possible, and against that stub `warned`
+    is always 0, which would make any upper bound vacuously true.
+
+    An exact ``== 3`` is deliberately NOT asserted: the corpus stands in for
+    a table Hermes grows upstream. A new built-in sharing a bigram should
+    relax this bound, not break an unrelated PR's test run.
+    """
+    import yaml
+
+    p = init_register.patterns
+    corpus = [
+        (e["pattern"], e["description"])
+        for e in yaml.safe_load(
+            (Path(__file__).parent / "fixtures" / "builtin_overlap_corpus.yaml").read_text(
+                encoding="utf-8"
+            )
+        )
+    ]
+
+    total = 0
+    warned = 0
+    for _name, entries in _shipped_example_patterns(p):
         total += len(entries)
         for e in entries:
-            if any(
-                isinstance(bp, str) and p._regexes_suspect_overlap(e["pattern"], bp)
-                for bp, _bd in DANGEROUS_PATTERNS
-            ):
+            if any(p._regexes_suspect_overlap(e["pattern"], bp) for bp, _bd in corpus):
                 warned += 1
 
     assert total > 40, "expected the shipped examples to still load"
-    assert warned <= 5, f"overlap warning noise regressed: {warned}/{total} patterns"
+    assert warned <= 3, f"overlap warning noise regressed: {warned}/{total} patterns"
+    assert warned >= 2, f"overlap matcher stopped detecting real overlaps: {warned}/{total}"
+
+
+def test_overlap_corpus_would_catch_a_regression_to_any_shared_token(
+    init_register, fake_detector
+):
+    """The corpus must still fail under the OLD rule, or the guard is blind.
+
+    A noise guard is only meaningful if loosening the matcher trips it. This
+    replays the pre-fix rule ("any shared token overlaps") over the same
+    corpus and shipped examples; it produced 29 warnings against the real
+    table, and 13 against this subset -- far above the pinned bound. If a
+    future edit to the corpus drops that headroom, the guard above would go
+    quiet without anyone noticing.
+    """
+    import yaml
+
+    p = init_register.patterns
+    corpus = [
+        e["pattern"]
+        for e in yaml.safe_load(
+            (Path(__file__).parent / "fixtures" / "builtin_overlap_corpus.yaml").read_text(
+                encoding="utf-8"
+            )
+        )
+    ]
+
+    def any_shared_token(a: str, b: str) -> bool:
+        return bool(set(p._normalized_tokens(a)) & set(p._normalized_tokens(b)))
+
+    warned = sum(
+        1
+        for _name, entries in _shipped_example_patterns(p)
+        for e in entries
+        if any(any_shared_token(e["pattern"], bp) for bp in corpus)
+    )
+
+    assert warned > 3, (
+        "corpus no longer discriminates: the any-shared-token rule no longer "
+        f"exceeds the pinned bound ({warned})"
+    )

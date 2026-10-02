@@ -1004,6 +1004,8 @@ def test_config_content_files_directory_with_sibling(cli_module, tmp_path):
     sibling.write_text("", encoding="utf-8")
     files = cli_module._config_content_files(d)
     assert a in files and sibling in files
+
+
 def _wire_cmd_test(monkeypatch, cli_module, block_pattern=r"\bvultr\b"):
     """Standard cmd_test wiring: one block rule, no allow/deny, fresh config."""
     import re as _re

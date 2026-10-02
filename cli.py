@@ -2067,8 +2067,14 @@ def _config_update_reminder() -> str:
     )
 
 
-# Allow-shadowing overlap helpers (_extract_tokens / _patterns_overlap) and
-
+# NOTE: the allow-shadowing diagnostics that used to live here were deleted with
+# allow patterns (034). Their underlying helpers remain in patterns.py --
+# find_uncovered_allow_shadowing, _patterns_overlap, _extract_tokens -- with no
+# caller outside tests/. They are retained deliberately rather than as dead
+# weight: 034 scoped them out as "plan 032 territory" and kept their coverage in
+# tests/test_patterns.py. Removing them here would churn three plans for no
+# behavioural gain. The startup overlap report does NOT use them; it uses
+# _regexes_suspect_overlap (patterns.py), which normalises tokens first.
 
 
 # ---------------------------------------------------------------------------
