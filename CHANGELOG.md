@@ -53,8 +53,10 @@ Background, ordering tables, and the reasoning behind each decision:
 - **Behaviour change:** a custom block pattern that also matches a Hermes built-in pattern is
   deferred to the built-in gate so only one prompt appears. The built-in description is shown
   instead of the custom one, and granting `always` on it stops the custom rule firing for that
-  class of command. A required startup warning names every overlapping pattern so the
-  enforcement change is disclosed rather than silent.
+  class of command. A startup warning flags block patterns that look similar to a
+  built-in, and `custom-dangerous-patterns test '<command>'` reports the deferral exactly for
+  a given command. The startup warning is a similarity estimate over regex sources, so it can
+  miss a real overlap -- the per-command probe is the authority, not the estimate.
 - **Behaviour change (narrow):** in a bare headless run with no unattended marker — no
   `HERMES_SINGLE_QUERY_SESSION`, `HERMES_CRON_SESSION`, `HERMES_SESSION_PLATFORM`,
   `HERMES_GATEWAY_SESSION`, or `HERMES_EXEC_ASK` — custom block patterns are now blocked where

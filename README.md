@@ -18,7 +18,7 @@ A [Hermes Agent](https://github.com/NousResearch/hermes-agent) plugin that adds 
 
 ## What It Does
 
-Hermes ships with ~47 hardcoded dangerous command patterns (`rm -rf`, `git reset --hard`, `docker stop`, etc.). When a command matches, you get an interactive approval prompt: `[o]nce`, `[s]ession`, `[a]lways`, or `[d]eny`.
+Hermes ships with over 100 built-in dangerous command patterns (`rm -rf`, `git reset --hard`, `docker stop`, etc.). When a command matches, you get an interactive approval prompt: `[o]nce`, `[s]ession`, `[a]lways`, or `[d]eny`.
 
 This plugin lets you define **your own patterns** in a YAML config file. They get the exact same approval flow — same prompts, same session persistence, same permanent allowlist, same gateway `/approve` and `/deny` support.
 
@@ -266,8 +266,12 @@ them on every `terminal` call:
 - **Overlapping block patterns defer** to the built-in gate rather than prompting
   twice — `[o]nce` on a first prompt would not satisfy a second. The trade-off is
   that the built-in description is shown, and granting `[a]lways` on it stops
-  your rule firing for that command class. The plugin logs a warning at startup
-  naming every overlapping pattern so this is never silent.
+  your rule firing for that command class.
+
+  At startup the plugin warns about block patterns that *look like* a built-in. That
+  is a similarity estimate over the two regex sources, so it is precise but not
+  complete. `custom-dangerous-patterns test '<command>'` asks Hermes about the
+  actual command and is exact — use it when you need to know.
 
 > Full ordering table, per-surface behaviour, and the reasoning behind each
 > decision: [Migrating to 0.5.0](https://github.com/scross01/custom-dangerous-patterns-plugin/wiki/Migrating-to-0.5.0).
@@ -280,7 +284,7 @@ The plugin tracks the integrity of your configuration across sessions:
 - **Protected patterns:** Patterns with `protected: true` have their individual regex SHA-256 hashed and tracked. If a protected pattern is **modified** or **removed**, a `CRITICAL` security warning is logged at startup.
 - **Built-in overlap disclosure:** For each block pattern that also matches a Hermes built-in dangerous pattern, a `WARNING` is logged at startup naming both descriptions, because such matches defer to the built-in gate rather than prompting separately.
 - **Retired allow entries:** Any `allow_patterns` left in your config produce a `CRITICAL` startup log and are reported as inert by `list`, `info`, and `validate`, so they can be reviewed and removed.
-- **Match log contents:** every allow/block/deny match is appended as JSONL to `~/.hermes/logs/custom-dangerous-patterns.log` **including the full command text** that matched. Treat that file as sensitive if your commands may contain secrets (tokens in URLs, inline passwords, etc.).
+- **Match log contents:** every block and deny match is appended as JSONL to `~/.hermes/logs/custom-dangerous-patterns.log` **including the full command text** that matched. Deferred block matches carry an extra `"deferred": true` field. Allow patterns are retired and are never logged. Treat that file as sensitive if your commands may contain secrets (tokens in URLs, inline passwords, etc.).
 
 These integrity checks provide defense-in-depth against unauthorized config tampering, but they are **detective, not preventive** — the plugin detects and logs changes but does not prevent them. See [Security & Risks](#security--risks) for more on the trust model.
 
@@ -408,11 +412,13 @@ hermes custom-dangerous-patterns list --group cloud      # patterns in a group
 hermes custom-dangerous-patterns list --disabled         # only disabled patterns
 hermes custom-dangerous-patterns list --enabled          # only active patterns
 hermes custom-dangerous-patterns list --search aws       # search descriptions and patterns
-hermes custom-dangerous-patterns list --builtins         # include Hermes built-in patterns (snapshot)
+hermes custom-dangerous-patterns list --builtins         # include Hermes's built-in patterns
 ```
 
-> **Note:** `--builtins` uses a static snapshot of Hermes's built-in patterns
-> bundled at plugin install time. These may drift from Hermes core updates.
+> **Note:** `--builtins` reads Hermes's built-in patterns live from
+> `tools.approval_detection` at the moment you run it, so it always reflects your
+> current Hermes version. Run it inside Hermes; elsewhere it reports that the
+> built-in list is unavailable rather than showing an empty list.
 
 ### `test <command>` — Verify patterns before running
 
@@ -426,7 +432,7 @@ hermes custom-dangerous-patterns test "git push --force" --skip-builtins
 
 Shows which patterns match and the result: **DENY** (blocked immediately), **APPROVAL PROMPT** (interactive prompt), or **PASS** (no patterns matched). Retired `allow_patterns` are listed for visibility but are never counted toward the verdict — such a command is not exempt. If one matches, the output ends with an explicit "This command is NOT exempt" note.
 
-`--verbose` shows full pattern regex and built-in matches. `--skip-builtins` omits Hermes's ~47 built-in patterns to focus on custom patterns.
+`--verbose` shows full pattern regex and built-in matches. `--skip-builtins` omits Hermes's built-in patterns to focus on custom patterns.
 
 ### `init` — First-run bootstrap
 
