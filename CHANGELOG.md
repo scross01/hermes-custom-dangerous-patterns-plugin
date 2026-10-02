@@ -1,6 +1,15 @@
 # Change Log
 
-## Unreleased
+## 0.5.0
+
+**Breaking.** The plugin no longer modifies any Hermes internal. It enforces block and deny
+patterns through the public `pre_tool_call` hook, which routes custom block patterns to
+Hermes's own human approval gate. The `[o]nce`/`[s]ession`/`[a]lways`/`[d]eny` prompt, the
+gateway `/approve` and `/deny` queue, timeout handling, and TUI/desktop/channel rendering are
+all Hermes's and are unchanged in appearance.
+
+Background, ordering tables, and the reasoning behind each decision:
+[Migrating to 0.5.0](https://github.com/scross01/custom-dangerous-patterns-plugin/wiki/Migrating-to-0.5.0).
 
 - **Removed all Hermes core overrides.** The plugin no longer writes to
   `DANGEROUS_PATTERNS` / `DANGEROUS_PATTERNS_COMPILED` and no longer rebinds
@@ -41,6 +50,22 @@
   trigger them.
 - For a command that should never prompt, use Hermes's own `command_allowlist` in
   `config.yaml` (exact command text, or a glob such as `vultr account info *`).
+- **Behaviour change:** a custom block pattern that also matches a Hermes built-in pattern is
+  deferred to the built-in gate so only one prompt appears. The built-in description is shown
+  instead of the custom one, and granting `always` on it stops the custom rule firing for that
+  class of command. A required startup warning names every overlapping pattern so the
+  enforcement change is disclosed rather than silent.
+- **Behaviour change (narrow):** in a bare headless run with no unattended marker — no
+  `HERMES_SINGLE_QUERY_SESSION`, `HERMES_CRON_SESSION`, `HERMES_SESSION_PLATFORM`,
+  `HERMES_GATEWAY_SESSION`, or `HERMES_EXEC_ASK` — custom block patterns are now blocked where
+  they previously auto-approved. Every other context is unchanged: cron, `-q`, `webhook`,
+  `msgraph_webhook`, and `api_server` are governed by `approvals.cron_mode` /
+  `single_query_mode` / `unattended_mode` (all `deny` by default), exactly as built-in patterns
+  are, and switching any of them to `approve` still auto-approves custom patterns too.
+- `list`, `info`, and `validate` mark retired allow entries; `validate` still exits 0 so a
+  previously-valid config does not start failing a gating script.
+- Added `tests/test_core_surface.py`, which fails on core rebinds **and** on the table writes
+  that `hermes plugins validate` does not detect.
 
 ## 0.4.5
 

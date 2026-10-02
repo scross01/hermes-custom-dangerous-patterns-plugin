@@ -11,6 +11,11 @@
 
 A [Hermes Agent](https://github.com/NousResearch/hermes-agent) plugin that adds custom dangerous command patterns to Hermes's built-in approval system.
 
+> **Upgrading from 0.4.x?** 0.5.0 stops modifying Hermes internals and **removes
+> allow patterns**. If you have an existing config, start with
+> [Migrating to 0.5.0](https://github.com/scross01/custom-dangerous-patterns-plugin/wiki/Migrating-to-0.5.0)
+> — it covers what changed, why, and how to update.
+
 ## What It Does
 
 Hermes ships with ~47 hardcoded dangerous command patterns (`rm -rf`, `git reset --hard`, `docker stop`, etc.). When a command matches, you get an interactive approval prompt: `[o]nce`, `[s]ession`, `[a]lways`, or `[d]eny`.
@@ -193,30 +198,38 @@ deny_patterns:
 
 > **\* `pattern` or `glob` required.** At least one must be present. If both are provided, `pattern` is used as-is.
 
-**Behavior note:** Deny patterns are checked by a wrapper around `check_all_command_guards()` that runs before `--yolo`/`mode=off` are evaluated. This means `--yolo` does **not** bypass deny patterns — an intentional safeguard that ensures deny-gated commands are always blocked regardless of mode. A future Hermes core integration (v0.5.0) may add native deny-pattern support upstream, at which point this workaround can be removed.
+**Behavior note:** A deny match returns `{"action": "block"}` from the plugin's hook before the approval gate is reached, so `--yolo` and `approvals.mode: off` do **not** bypass deny patterns — an intentional safeguard, and unchanged from 0.4.x.
 
-### Allow Patterns
+### Allow Patterns (removed in 0.5.0)
 
-Exempt specific commands from approval, even if they match a block pattern:
+Allow patterns exempted a command from all dangerous-command detection. They were
+removed because no supported Hermes surface can express "do not apply a gate":
+`pre_tool_call` only *adds* gates, the approval hooks are observer-only, and
+Hermes's `command_allowlist` matches exact command text or shell globs rather
+than regex.
 
-```yaml
-allow_patterns:
-  - pattern: '\bvultr\s+(account\s+info|instance\s+list)\b'
-    description: 'Read-only Vultr commands'
-    enabled: true
-    group: cloud
+**Any `allow_patterns` still in your config are inert.** They are reported but
+never enforced, and nothing is auto-deleted from your config:
+
+```sh
+# See them
+hermes custom-dangerous-patterns list --type allow
+
+# Remove them (choose from the list output)
+hermes custom-dangerous-patterns remove --type allow <index>
 ```
 
-| Field | Required | Description |
-|-------|----------|-------------|
-| `pattern` | Yes* | Python regex (same flags as block patterns). Can be omitted if `glob` is provided — auto-generated from glob. |
-| `description` | No | Documentation-only label |
-| `enabled` | No | Boolean (default `true`). Set `false` to temporarily disable |
-| `group` | No | Optional string tag for categorization |
-| `protected` | No | Boolean (default `false`). If `true`, integrity-checked across sessions |
-| `glob` | No | Original glob string. If `pattern` is absent, auto-converted to regex on load. |
+For a command that should never prompt, use Hermes's own `command_allowlist` in
+`config.yaml` — exact command text, or a shell glob:
 
-> **\* `pattern` or `glob` required.** At least one must be present. If both are provided, `pattern` is used as-is.
+```yaml
+command_allowlist:
+  - 'vultr account info'
+  - 'vultr instance list *'
+```
+
+> Why the feature was removed rather than kept, and what else changed in 0.5.0:
+> [Migrating to 0.5.0](https://github.com/scross01/custom-dangerous-patterns-plugin/wiki/Migrating-to-0.5.0).
 
 ### A Note on `\b` (Word Boundaries)
 
@@ -234,40 +247,30 @@ Without `\b`, `\bvultr` would match any string containing "vultr" — including 
 
 ### Evaluation Order
 
-> **Note:** The runtime evaluation order differs from the logical order because the deny-pattern wrapper runs *before* the original `check_all_command_guards()` function that contains the yolo/mode=off check. This means deny patterns intercept `--yolo` and `mode=off`.
+The plugin enforces patterns through a single `pre_tool_call` hook, which checks
+them on every `terminal` call:
 
-Each check is tagged with its source:
-- `[Plugin]` — this plugin's custom checks
-- `[Hermes]` — Hermes Agent's built-in checks
-
-```
- 1. [Plugin]  Deny patterns (custom)        → BLOCKED immediately, no prompt
- 2. [Hermes]  Hardline check                → blocked unconditionally
- 3. [Hermes]  Root-privilege stdin guard  → blocked unconditionally
- 4. [Hermes]  Yolo / mode=off               → bypasses steps 5-7
- 5. [Plugin]  Allow patterns (custom)       → command runs, no prompt (allow wins)
- 6. detect_dangerous_command():             — same approval prompt for both —
-    a. [Plugin]  Block patterns (custom)    → [o]nce/[s]ession/[a]lways/[d]eny
-    b. [Hermes]  Built-in patterns          → [o]nce/[s]ession/[a]lways/[d]eny
- 7. [Hermes]  Tirith security scan          → approval prompt if findings
-```
-
-**What each tier means:**
-
-| Tier | Source | Behavior | Prompt? | Bypassed by `--yolo`? |
-|------|--------|----------|---------|----------------------|
-| Deny patterns | Plugin | **Immediate block** — command is rejected before any approval logic runs | ❌ No | ❌ No |
-| Hardline / Root-privilege | Hermes | **Unconditional block** — catastrophic or dangerous-by-design commands | ❌ No | ❌ No |
-| Allow patterns | Plugin | **Silent pass** — command runs without any check (allow wins over block) | ❌ No | N/A |
-| Block patterns | Plugin | **Approval prompt** — same as built-in DANGEROUS_PATTERNS | ✅ Yes | ✅ Yes |
-| Built-in patterns | Hermes | **Approval prompt** — Hermes's ~47 hardcoded dangerous command patterns | ✅ Yes | ✅ Yes |
-| Tirith scan | Hermes | **Approval prompt** — security scan of command content | ✅ Yes | ✅ Yes |
+| # | Check | Result | Prompt? | Bypassed by `--yolo`? |
+|---|-------|--------|---------|----------------------|
+| 1 | **Deny patterns** | **Immediate block** | ❌ No | ❌ No |
+| 2 | **Block patterns** | **Approval prompt** via Hermes's own gate | ✅ Yes | ✅ Yes |
+| 3 | **Block patterns** that also match a built-in | Deferred to the built-in gate, so one prompt appears | ✅ Yes | ✅ Yes |
+| 4 | No match | Command proceeds | — | — |
 
 **Key rules:**
-- **Allow wins over block.** If a command matches both an allow pattern and a block pattern, allow wins and no prompt is shown.
-- **Deny wins over allow.** Deny patterns are checked before allow patterns. If a command matches a deny pattern, it is blocked before allow patterns are even evaluated.
-- **Deny is immediate-block; block is approval-prompt.** Block patterns and built-in patterns both go through the same `detect_dangerous_command()` approval flow. Deny patterns skip it entirely.
-- **Deny bypasses yolo.** Deny patterns are evaluated outside the original guard function, so `--yolo` does not bypass them.
+- **Deny wins over block.** Deny is checked first and is never bypassed by
+  `--yolo` or `approvals.mode: off`.
+- **Block patterns are bypassed by `--yolo` and `approvals.mode: off`**, exactly
+  as Hermes's built-in dangerous-command patterns are.
+- **There is no allow tier.** Nothing in this config can exempt a command.
+- **Overlapping block patterns defer** to the built-in gate rather than prompting
+  twice — `[o]nce` on a first prompt would not satisfy a second. The trade-off is
+  that the built-in description is shown, and granting `[a]lways` on it stops
+  your rule firing for that command class. The plugin logs a warning at startup
+  naming every overlapping pattern so this is never silent.
+
+> Full ordering table, per-surface behaviour, and the reasoning behind each
+> decision: [Migrating to 0.5.0](https://github.com/scross01/custom-dangerous-patterns-plugin/wiki/Migrating-to-0.5.0).
 
 ### Config Integrity & Protected Patterns
 
@@ -275,8 +278,8 @@ The plugin tracks the integrity of your configuration across sessions:
 
 - **Config hash tracking:** A SHA-256 hash of your full config YAML is stored in `~/.hermes/.custom-patterns-hash`. If the config changes between sessions, a `WARNING` is logged with the old and new pattern counts.
 - **Protected patterns:** Patterns with `protected: true` have their individual regex SHA-256 hashed and tracked. If a protected pattern is **modified** or **removed**, a `CRITICAL` security warning is logged at startup.
-- **Allow shadowing detection:** When an allow pattern could bypass a built-in dangerous pattern without a corresponding custom block pattern, a `WARNING` is logged with the details.
-- **Catch-all allow refusal:** Allow patterns that would exempt everything (`.*`, `.+`, `^.*$`, `(?s).*`, empty/whitespace-only) or that match the built-in dangerous-command examples (recursive root deletion, `dd` onto a block device, download-and-execute pipelines) are **refused**: skipped with an `ERROR` log when loading the YAML, and rejected by `hermes custom-dangerous-patterns add --type allow`. There is no override flag: the loader refuses these unconditionally, so a written entry could never take effect.
+- **Built-in overlap disclosure:** For each block pattern that also matches a Hermes built-in dangerous pattern, a `WARNING` is logged at startup naming both descriptions, because such matches defer to the built-in gate rather than prompting separately.
+- **Retired allow entries:** Any `allow_patterns` left in your config produce a `CRITICAL` startup log and are reported as inert by `list`, `info`, and `validate`, so they can be reviewed and removed.
 - **Match log contents:** every allow/block/deny match is appended as JSONL to `~/.hermes/logs/custom-dangerous-patterns.log` **including the full command text** that matched. Treat that file as sensitive if your commands may contain secrets (tokens in URLs, inline passwords, etc.).
 
 These integrity checks provide defense-in-depth against unauthorized config tampering, but they are **detective, not preventive** — the plugin detects and logs changes but does not prevent them. See [Security & Risks](#security--risks) for more on the trust model.
@@ -285,7 +288,9 @@ These integrity checks provide defense-in-depth against unauthorized config tamp
 
 Instead of a single file, you can use a **directory**. The plugin loads all `*.yaml` files in alphabetical order and merges them:
 
-- Lists (`patterns`, `allow_patterns`, `deny_patterns`) are **extended** (appended)
+- Lists (`patterns`, `allow_patterns`, `deny_patterns`) are **extended** (appended).
+  `allow_patterns` is retired: it still loads so `list`/`remove`/`enable` can
+  report and delete it, but nothing is enforced.
 - Scalars override previous values
 
 This is useful for splitting configs by tool or team:
@@ -375,33 +380,17 @@ patterns:
       - 'mongodump --drop --db production'
 
 # ── Allow patterns ────────────────────────────────────────────────
-# Commands matching these are EXEMPT from approval, even if they
-# also match a blocked pattern. Evaluated BEFORE block patterns.
-# Allow wins over block.
-
-allow_patterns:
-  # ── Read-only cloud commands (safe) ─────────────────────────────
-  - pattern: '\bvultr\s+(account\s+info|instance\s+list|dns\s+list|plan\s+list)\b'
-    description: 'Read-only Vultr commands'
-
-  - pattern: '\baws\s+(ec2\s+describe|s3\s+ls|s3\s+cp.*--dry-run|iam\s+list)\b'
-    description: 'AWS read-only commands'
-
-  - pattern: '\bterraform\s+(plan|state\s+list|output)\b'
-    description: 'Terraform read-only commands'
-
-  - pattern: '\boci\s+(compute\s+instance\s+list|network\s+vcn\s+list|database\s+db\s+system\s+list)\b'
-    description: 'Oracle Cloud read-only commands'
-
-  - pattern: '\bdoctl\s+(compute\s+droplet\s+list|kubernetes\s+cluster\s+list|databases\s+list)\b'
-    description: 'DigitalOcean read-only commands'
-
-  # ── Help and utility (safe) ─────────────────────────────────────
-  - pattern: '\b(vultr|gcloud|aws|terraform|kubectl|oci|doctl)\s+(-h|--help|help)\b'
-    description: 'Help flags are safe'
-
-  - pattern: '\b(vultr|gcloud|aws|terraform|oci|doctl)\s+completion\b'
-    description: 'Shell completion scripts are safe'
+# REMOVED in 0.5.0 — nothing below can exempt a command any more.
+# Existing entries still load and are reported as inert so you can
+# review and remove them:
+#   hermes custom-dangerous-patterns list --type allow
+#   hermes custom-dangerous-patterns remove --type allow <index>
+#
+# Commands that should never prompt belong in Hermes's own
+# command_allowlist in config.yaml, e.g.:
+#   command_allowlist:
+#     - 'vultr account info'
+#     - 'vultr instance list *'
 ```
 
 ## CLI Reference
@@ -413,7 +402,7 @@ All commands follow the `hermes custom-dangerous-patterns <verb>` pattern, consi
 ```bash
 hermes custom-dangerous-patterns list                    # all patterns
 hermes custom-dangerous-patterns list --type block       # block patterns only
-hermes custom-dangerous-patterns list --type allow       # allow patterns only
+hermes custom-dangerous-patterns list --type allow       # retired allow entries (inert, not enforced)
 hermes custom-dangerous-patterns list --type deny        # deny patterns only
 hermes custom-dangerous-patterns list --group cloud      # patterns in a group
 hermes custom-dangerous-patterns list --disabled         # only disabled patterns
@@ -435,7 +424,7 @@ hermes custom-dangerous-patterns test "vultr account info" --verbose
 hermes custom-dangerous-patterns test "git push --force" --skip-builtins
 ```
 
-Shows which patterns match and the result: **DENY** (blocked immediately), **ALLOW** (runs freely), **APPROVAL PROMPT** (interactive prompt), or **PASS** (no patterns matched).
+Shows which patterns match and the result: **DENY** (blocked immediately), **APPROVAL PROMPT** (interactive prompt), or **PASS** (no patterns matched). Retired `allow_patterns` are listed for visibility but are never counted toward the verdict — such a command is not exempt. If one matches, the output ends with an explicit "This command is NOT exempt" note.
 
 `--verbose` shows full pattern regex and built-in matches. `--skip-builtins` omits Hermes's ~47 built-in patterns to focus on custom patterns.
 
@@ -525,7 +514,7 @@ hermes custom-dangerous-patterns add --type block \
 
 | Flag | Description |
 |------|-------------|
-| `-t` / `--type` | Pattern type: `block`, `allow`, or `deny` (required non-interactive) |
+| `-t` / `--type` | Pattern type: `block` or `deny` (required non-interactive). `allow` is **refused** — see [Allow Patterns](#allow-patterns-removed-in-050) |
 | `-p` / `--pattern` | Raw regex pattern (required non-interactive; mutually exclusive with `--glob`) |
 | `--glob` | Glob-style pattern like `echo hello` — converted to regex automatically |
 | `-d` / `--description` | Human-readable description |
@@ -583,10 +572,9 @@ directly to remove them.
 
 ## How It Works
 
-The plugin injects your custom patterns into Hermes's `DANGEROUS_PATTERNS` list at startup via pattern injection + two monkey-patches:
-
-1. **`detect_dangerous_command()`** — patched for allow-pattern support (allow patterns bypass all detection)
-2. **`check_all_command_guards()`** — patched for deny-pattern support (deny patterns block immediately, no prompt)
+The plugin enforces your patterns through a single `pre_tool_call` hook — a
+public plugin API. It does not modify any Hermes internal: no pattern tables are
+written and no core function is rebound.
 
 ```
 Hermes startup:
@@ -594,38 +582,46 @@ Hermes startup:
   2. Resolves config path (env var → ~/.hermes/custom-dangerous-patterns/ directory or single .yaml file)
   3. Loads YAML (supports directory mode: all *.yaml files merged)
   4. Runs integrity checks (config SHA-256 hash, protected pattern verification)
-  5. Compiles regex patterns (block, allow, deny)
-  6. Appends block patterns to DANGEROUS_PATTERNS / DANGEROUS_PATTERNS_COMPILED
-  7. Monkey-patches detect_dangerous_command() for allow-pattern support
-  8. Monkey-patches check_all_command_guards() for deny-pattern support
-  9. Checks for allow shadowing (allow patterns that may bypass built-in patterns)
-  10. Agent runs → allow/deny/block patterns checked in order → approval flow
+  5. Compiles regex patterns (block, deny)
+  6. Registers one pre_tool_call hook
+  7. Agent runs → the hook checks deny, then block → Hermes's native approval gate
 ```
 
-The built-in approval system then handles everything automatically:
+On each `terminal` call the hook checks **deny** patterns first (immediate block,
+no prompt), then **block** patterns, which escalate to Hermes's own human
+approval gate. Block patterns that also match a built-in dangerous pattern defer
+to the built-in gate so you get one prompt, not two.
+
+Because escalation goes through Hermes, you get the standard prompt on every
+surface:
 
 | Context | Behavior |
 |---------|----------|
 | **CLI** | Interactive `[o]nce`/`[s]ession`/`[a]lways`/`[d]eny` prompt |
+| **TUI / desktop** | The same prompt, rendered by Hermes's own UI |
 | **Gateway** (Telegram/Discord/etc.) | `/approve` and `/deny` commands, async approval queue |
 | **Session persistence** | "Session" choice survives for the session duration |
-| **Permanent allowlist** | "Always" choice persists to `command_allowlist` in `config.yaml` |
-| **Smart mode** | If `approvals.mode: smart`, auxiliary LLM assesses custom patterns |
+| **Permanent allowlist** | "Always" persists `plugin_rule:cdp:<hash>` to `command_allowlist` |
+| **Smart mode** | If `approvals.mode: smart`, an auxiliary LLM assesses the decision |
 | **Cron** | Respects `approvals.cron_mode` (deny by default) |
-| **`--yolo`** | Block patterns (custom + built-in) are bypassed. **Deny patterns still block** — they intercept before the yolo check. |
+| **`--yolo` / `approvals.mode: off`** | Block patterns are bypassed, exactly as built-ins are. **Deny patterns still block.** |
+
+> Full ordering table, per-surface behaviour, and the reasoning behind each
+> design decision: [Migrating to 0.5.0](https://github.com/scross01/custom-dangerous-patterns-plugin/wiki/Migrating-to-0.5.0).
 
 ## Edge Cases
 
 | Scenario | Behavior |
 |----------|----------|
-| Config file missing | Plugin loads silently, no patterns injected |
+| Config file missing | Plugin loads silently, no patterns enforced |
 | Config file invalid YAML | Log WARNING, plugin loads with empty pattern list |
 | Invalid regex in pattern | Log WARNING for that pattern, skip it, load valid ones |
-| Block pattern matches but allow also matches | Allow wins — no prompt (allow wins over block) |
-| Deny pattern matches (and allow also matches) | Deny wins — blocked immediately (deny checked before allow) |
+| Retired `allow_patterns` present | Reported as inert by `list`/`info`/`validate`; CRITICAL log at startup. `validate` still exits 0. |
+| Block pattern also matches a built-in | Deferred to the built-in gate so one prompt appears; disclosed by a startup warning |
+| Bare headless run (no unattended marker) | Custom block patterns are blocked; built-in patterns auto-approve. Every other context (CLI, TUI, desktop, channels, cron, `-q`, webhook, `api_server`) behaves identically to built-ins. |
 | Deny pattern match | Blocked immediately, no prompt |
-| `--yolo` mode | Block patterns (custom + built-in) bypassed. Deny patterns still block — checked outside the original guard function. |
-| `approvals.mode: off` | Block patterns bypassed. Deny patterns still block — checked outside the original guard function. |
+| `--yolo` mode | Block patterns (custom + built-in) bypassed. Deny patterns still block — the hook returns `block` before the approval gate. |
+| `approvals.mode: off` | Block patterns bypassed. Deny patterns still block — same reason. |
 | `approvals.mode: smart` | Custom patterns assessed by auxiliary LLM |
 | Cron session + `cron_mode: deny` | Custom patterns blocked in cron |
 | Container backend (docker, etc.) | All approval checks skipped (sandboxed) |
@@ -638,13 +634,13 @@ The built-in approval system then handles everything automatically:
 
 > The plugin's stance on self-modification is: **allow it, detect it, log it.**
 
-The agent running Hermes can read and write `~/.hermes/custom-dangerous-patterns.yaml`. This means an agent could edit allow patterns to bypass approval checks (except hardline commands, which are always blocked). Catch-all allow patterns such as `allow_patterns: [{pattern: '.*'}]` are refused at load time, but the trust model is otherwise by design — the plugin is a safety net, not a jail.
+The agent running Hermes can read and write `~/.hermes/custom-dangerous-patterns.yaml`. An agent with write access can **narrow or disable its own block patterns and delete its own deny patterns**. Since 0.5.0 that is the *only* lever it has: there is no exemption feature left to abuse, because no pattern in this config can make a command run without approval. The trust model is otherwise by design — the plugin is a safety net, not a jail.
 
 The `_config_cache` freeze means mid-session edits are ignored, but changes take effect after the next Hermes restart.
 
 ### Risks the plugin cannot prevent
 
-- An agent could add a broad (but not catch-all) allow pattern to exempt itself from a wide range of dangerous-pattern checks. Catch-alls are refused at load time — literal ones such as `allow_patterns: [{pattern: '.*'}]` and any regex that matches every built-in dangerous-command example (e.g. `\S+`, `git|curl|dd|rm`) — but a broad hand-crafted regex that does not match every example still only triggers the shadowing `WARNING`
+- An agent could delete a deny pattern outright, removing the strongest protection you configured
 - An agent could modify protected patterns — changing both the pattern and its `protected` flag
 - Config modifications via Python I/O or AI tool calls are invisible to pattern matching. Only literal command-line path references to the config file are potentially caught by patterns
 
@@ -652,7 +648,8 @@ The `_config_cache` freeze means mid-session edits are ignored, but changes take
 
 - **Protected patterns:** Patterns with `protected: true` have their regex SHA-256 hashed and tracked in `~/.hermes/.custom-patterns-hash`. If a protected pattern is modified or removed, a **CRITICAL** security warning is logged at startup.
 - **Config hash tracking:** The full config SHA-256 is stored between sessions. Any change triggers a `WARNING` on next load with details of what changed (old vs new pattern counts).
-- **New-allow shadowing detection:** If a new allow pattern could bypass a built-in dangerous-pattern check without a corresponding custom block pattern, a `WARNING` is logged with details.
+- **Built-in overlap disclosure:** For each block pattern that also matches a Hermes built-in dangerous pattern, a `WARNING` is logged at startup naming both descriptions, because such matches defer to the built-in gate.
+- **No exemption surface:** The plugin deliberately offers no way for a pattern in your config to make a command run without approval. That capability existed only via allow patterns and is gone. Commands that should never prompt belong in Hermes's `command_allowlist`, which the plugin never writes to.
 
 ### Example bypass vectors
 
@@ -719,12 +716,35 @@ hermes custom-dangerous-patterns test "vultr account info" --verbose
 
 The `--verbose` output shows which patterns matched and the result.
 
+### A block pattern prompts, but I expected no prompt
+
+If a command matches both your pattern and one of Hermes's built-in dangerous
+patterns, the plugin **defers to the built-in gate** so you get a single prompt
+rather than two. The consequence is that the built-in description is shown, and
+choosing `[a]lways` on it permanently allowlists the *built-in* key — which stops
+your custom rule firing for that class of command.
+
+Check with `--verbose` on `test`, and look for a `BUILT-IN OVERLAP` warning at
+startup. Narrowing your pattern so it no longer overlaps gives you your own
+description and an independent allowlist entry.
+
+### My `always` approval stopped applying after upgrading
+
+Approvals granted under 0.4.x do not carry over to 0.5.0. Approval keys are now
+derived from the pattern's **regex** rather than its description, so the first
+time you approve each rule after upgrading, a new `plugin_rule:cdp:<hash>` entry
+is written. This is a one-time re-grant, and it means that editing a pattern's
+*description* no longer discards your approval.
+
+> Background and the full list of 0.5.0 changes:
+> [Migrating to 0.5.0](https://github.com/scross01/custom-dangerous-patterns-plugin/wiki/Migrating-to-0.5.0).
+
 ### Deny patterns not blocking
 
 If deny patterns are not blocking commands, verify:
 
 1. The pattern is enabled — `hermes custom-dangerous-patterns list --enabled --type deny`
-2. No allow pattern is intercepting the command before the deny check (allow is checked after deny, so if both match, deny wins)
+2. The command is not normalized into your pattern's shape — deny patterns are matched against the same shell-spliced variants Hermes uses for its own patterns, so try `hermes custom-dangerous-patterns test "<command>"` and compare
 3. Restart Hermes after config changes (mid-session edits are silently ignored)
 
 Test deny pattern matching:
