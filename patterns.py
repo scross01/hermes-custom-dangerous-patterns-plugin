@@ -1,11 +1,25 @@
 """Pattern compilation and command matching.
 
 Compiles raw config patterns into (compiled_regex, description) tuples and
-provides the matchers the pre_tool_call hook uses: find_block_match,
-find_deny_match, and is_deny_pattern.
+provides the matchers used to decide what the pre_tool_call hook does.
 
-Allow patterns were retired in 034 -- no supported Hermes surface can express
-"do not apply a gate" -- so this module no longer compiles any.
+Two different consumers, and the distinction matters:
+
+* The HOOK calls only :func:`find_block_match` and :func:`find_deny_match`
+  (see ``__init__.py``, where they are handed to ``_make_policy_hook``).
+  Those are the only functions on the enforcement path.
+* The CLI ``test`` subcommand calls :func:`is_deny_pattern` and
+  :func:`is_allow_pattern`, which report a description for the first match.
+  They are diagnostics for that one subcommand.
+
+Allow patterns were retired in plan 034 -- no supported Hermes surface can
+express "do not apply a gate" -- but they are still COMPILED here:
+:func:`compile_all` populates ``_allow_compiled`` and :func:`is_allow_pattern`
+still reads it. What is retired is ENFORCEMENT: nothing on the hook path
+consults ``_allow_compiled``, so a compiled allow pattern gates nothing. The
+retained helpers are deliberate (see the note in cli.py) and still covered by
+tests; do not remove ``_allow_compiled`` on the assumption that allow patterns
+are gone -- it is the CLI's report path, and plan 032 still references it.
 """
 
 from __future__ import annotations

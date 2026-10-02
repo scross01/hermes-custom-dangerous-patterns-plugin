@@ -454,7 +454,7 @@ def _build_minimal_starter_config() -> dict[str, Any]:
     """Build a minimal starter config with [TEST] patterns only.
 
     Deliberately ships NO allow_patterns entry. Allow patterns were retired in
-    034, and allow_pattern_retirement_notice() fires on ANY allow entry --
+    plan 034, and allow_pattern_retirement_notice() fires on ANY allow entry --
     disabled included, because an inert entry still misleads whoever reads the
     config. Since __init__.py logs that notice at CRITICAL, seeding one here
     meant a brand-new `init` immediately emitted the upgrading-user warning
@@ -728,7 +728,7 @@ def _toggle_interactive(
     }
     section_labels = {
         "patterns": "BLOCK",
-        # Allow patterns are retired (034): the entries may still exist on disk
+        # Allow patterns are retired (plan 034): the entries may still exist on disk
         # but are INERT. Say so here, exactly as `list` (INERT), the add menu
         # ("Allow (retired)") and `test` do -- otherwise a user can enable an
         # inert entry from this menu without being told nothing enforces it.
@@ -2075,10 +2075,10 @@ def _config_update_reminder() -> str:
 
 
 # NOTE: the allow-shadowing diagnostics that used to live here were deleted with
-# allow patterns (034). Their underlying helpers remain in patterns.py --
+# allow patterns (plan 034). Their underlying helpers remain in patterns.py --
 # find_uncovered_allow_shadowing, _patterns_overlap, _extract_tokens -- with no
 # caller outside tests/. They are retained deliberately rather than as dead
-# weight: 034 scoped them out as "plan 032 territory" and kept their coverage in
+# weight: plan 034 scoped them out as "plan 032 territory" and kept their coverage in
 # tests/test_patterns.py. Removing them here would churn three plans for no
 # behavioural gain. The startup overlap report does NOT use them; it uses
 # _regexes_suspect_overlap (patterns.py), which normalises tokens first.
