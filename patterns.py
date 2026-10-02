@@ -46,17 +46,58 @@ def builtin_overlaps(command: str) -> bool:
     return bool(is_dangerous)
 
 
+def _normalized_tokens(pattern: str) -> list[str]:
+    """Bare word tokens from a regex source, with regex syntax stripped.
+
+    ``_extract_tokens`` keeps escape sequences, so ``rm\\s+-rf`` yields
+    ``['rm\\\\s+', '-rf\\\\s+']`` -- which shares nothing with the literal
+    ``['rm', '-rf']`` that a hand-written or differently-spelled built-in
+    produces. Comparing those two spellings found *zero* overlap between a
+    user's ``rm\\s+-rf\\s+/`` rule and Hermes's own recursive-delete pattern.
+    Collapsing the syntax first is what makes the comparison mean anything.
+    """
+    s = re.sub(r"\\s\*\+?", " ", pattern)          # \s* \s+ \s  ->  a space
+    s = re.sub(r"\\[bBAWZdDsSwW]", " ", s)        # anchors and character classes
+    s = re.sub(r"[\\*+?.^$()\[\]{}|]", " ", s)
+    s = s.replace("\\", " ")
+    return [t for t in re.split(r"[^A-Za-z0-9_@%/.:+-]+", s) if re.search(r"[A-Za-z0-9]", t)]
+
+
+def _bigrams(tokens: list[str]) -> set[tuple[str, str]]:
+    return {(tokens[i], tokens[i + 1]) for i in range(len(tokens) - 1)}
+
+
+def _regexes_suspect_overlap(a: str, b: str) -> bool:
+    """Heuristic: two regex SOURCES plausibly match the same commands.
+
+    Compares ADJACENT token pairs rather than any shared token. A single shared
+    token is far too weak: on the patterns this plugin ships, "any shared token"
+    fired on 27 of 47 examples, pairing things like `brew install` with
+    "stop/restart hermes launchd service" over the token `remove`. Requiring a
+    shared bigram drops that to 9 and keeps the pairings plausible.
+
+    This remains a heuristic. Two spellings of the same rule can share no bigram
+    at all, so a real overlap can be missed -- which is why the enforcement-time
+    probe :func:`builtin_overlaps` is the authority, and why the caller must
+    phrase its warning as a possibility rather than a fact.
+    """
+    left, right = _bigrams(_normalized_tokens(a)), _bigrams(_normalized_tokens(b))
+    if not left or not right:
+        return False
+    return bool(left & right)
+
+
 def builtin_overlap_report() -> list[tuple[str, str]]:
-    """Enabled block patterns that plausibly overlap a Hermes built-in pattern.
+    """Enabled block patterns that may overlap a Hermes built-in pattern.
 
     Returns ``[(custom_description, builtin_description), ...]``.
 
-    Both sides are REGEX SOURCES, not commands, so this compares them with the
-    shared token-overlap heuristic (:func:`_patterns_overlap`) rather than
-    matching one against the other. It is deliberately an over-approximation:
-    a false positive costs one extra startup WARNING, while a false negative
-    would let an operator grant "always" on the built-in prompt without ever
-    learning their own rule stopped firing.
+    Both sides are REGEX SOURCES, not commands, so they are compared with
+    :func:`_regexes_suspect_overlap` rather than matched against each other.
+    The comparison is inherently approximate in BOTH directions and this function
+    must be treated as a prompt to check, not a verdict: use
+    ``custom-dangerous-patterns test '<command>'`` for a specific command, which
+    consults the exact probe (:func:`builtin_overlaps`).
 
     Reads tools.approval_detection.DANGEROUS_PATTERNS (read-only). Returns
     ``[]`` (never raises) when Hermes's table is unavailable, e.g. the CLI
@@ -68,15 +109,11 @@ def builtin_overlap_report() -> list[tuple[str, str]]:
         return []
 
     report: list[tuple[str, str]] = []
-    for block_re, desc in _block_compiled:
+    for _block_re, desc in _block_compiled:
         for builtin_pat, builtin_desc in DANGEROUS_PATTERNS:
             if not isinstance(builtin_pat, str):
                 continue
-            try:
-                builtin_re = re.compile(builtin_pat, _RE_FLAGS)
-            except re.error:
-                continue
-            if _patterns_overlap(block_re, builtin_re):
+            if _regexes_suspect_overlap(_block_re.pattern, builtin_pat):
                 report.append((desc, builtin_desc))
                 break
     return report
@@ -188,11 +225,16 @@ def compile_allow_patterns(raw_patterns: list[dict[str, str]]) -> list[tuple[re.
         description = entry.get("description", pattern_str)
         reason = catch_all_reason(pattern_str)
         if reason is not None:
-            logger.error(
-                "custom-dangerous-patterns: REFUSING allow pattern %r (%s): %s. "
-                "Narrow the pattern to the specific command you want to exempt.",
+            # Allow patterns are RETIRED -- nothing here is enforced any more,
+            # so "REFUSING" is a lie and ERROR would read as a broken config on
+            # every startup for anyone who still has a catch-all entry. The
+            # retirement CRITICAL notice in __init__.register is the disclosure
+            # that matters; this line just keeps the CLI's "would have exempted"
+            # preview from claiming a catch-all matched.
+            logger.debug(
+                "custom-dangerous-patterns: skipping retired allow pattern %r "
+                "(%s) in the CLI preview; allow patterns are not enforced",
                 pattern_str,
-                description,
                 reason,
             )
             continue

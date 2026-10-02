@@ -732,8 +732,15 @@ def test_catch_all_reason_accepts_narrow_allow_patterns():
         assert catch_all_reason(pat) is None, pat
 
 
-def test_compile_allow_patterns_skips_catch_all_with_error(caplog):
-    """compile_allow_patterns drops catch-all entries and logs at ERROR."""
+def test_compile_allow_patterns_skips_catch_all_without_error(caplog):
+    """Catch-all allow patterns are skipped, but NOT reported as an error.
+
+    Allow patterns are retired: nothing here is enforced, so a catch-all entry
+    cannot disable anything and "REFUSING" would be a false statement. Emitting
+    ERROR on every startup would read as a broken config to anyone upgrading
+    with an old allow entry still in place. The retirement CRITICAL notice in
+    register() is the disclosure that matters.
+    """
     import logging
 
     from patterns import compile_allow_patterns
@@ -742,12 +749,11 @@ def test_compile_allow_patterns_skips_catch_all_with_error(caplog):
         {"pattern": ".*", "description": "Allow everything"},
         {"pattern": r"\bvultr\s+account\s+info\b", "description": "Vultr info"},
     ]
-    with caplog.at_level(logging.ERROR, logger="patterns"):
+    with caplog.at_level(logging.WARNING, logger="patterns"):
         compiled = compile_allow_patterns(raw)
     assert [desc for _, desc in compiled] == ["Vultr info"]
-    assert any(
-        rec.levelno == logging.ERROR and "REFUSING allow pattern" in rec.getMessage()
-        for rec in caplog.records
+    assert not [r for r in caplog.records if r.levelno >= logging.WARNING], (
+        "a retired catch-all allow entry must not produce WARNING/ERROR noise"
     )
 
 

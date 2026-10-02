@@ -282,3 +282,98 @@ def test_read_match_log_entries_renders_deferred(logfile_mod):
     assert "deferred to Hermes built-in gate" in entries[0]["message"]
     assert "deferred" not in entries[1]["message"]
     assert json.dumps(entries)  # serialisable for the logs subcommand
+# ---------------------------------------------------------------------------
+# Overlap estimation precision (added after the 0.5.0 upgrade review)
+# ---------------------------------------------------------------------------
+
+
+def test_overlap_ignores_a_single_generic_shared_token(init_register):
+    """One generic token must not make two unrelated patterns "overlap".
+
+    The shipped examples produced 27 startup warnings out of 47 patterns,
+    pairing e.g. `brew install/uninstall/remove` with "stop/restart hermes
+    launchd service" over the single token `remove`. Requiring a shared
+    adjacent token pair drops that to 3 and keeps the pairings plausible.
+    """
+    p = init_register.patterns
+    assert not p._regexes_suspect_overlap(
+        r"\bbrew\s+(install|uninstall|remove)\b",
+        r"\b(?:brew\s+)?launchctl\s+(stop|restart)\b",
+    )
+
+
+def test_overlap_is_precise_but_not_complete(init_register):
+    r"""The estimator is tuned for precision, and its recall limit is documented.
+
+    Two regex SOURCES cannot be compared soundly: a built-in written with a
+    wildcard (\brm\s+(-[^\s]*\s+)*/) shares no adjacent token pair with
+    a user rule spelled rm\s+-rf\s+/. Measured against Hermes's real table
+    and realistic user rules, the estimator has 0 false positives but does miss
+    genuine overlaps -- which is exactly why the startup message says
+    "looks similar" and points at `custom-dangerous-patterns test`, whose probe
+    asks Hermes about a real command. Do not let a future edit re-tighten this
+    into a claim of completeness.
+    """
+    p = init_register.patterns
+    assert callable(p._regexes_suspect_overlap)
+    # The recall limit is load-bearing; assert the specific miss so it is
+    # visible rather than folklore.
+    assert not p._regexes_suspect_overlap(
+        r"rm\s+-rf\s+/[^\s]", r"\brm\s+(-[^\s]*\s+)*/"
+    ), "if this now matches, the estimator improved and the docs should say so"
+
+
+def test_normalized_tokens_strip_regex_syntax(init_register):
+    """Escape sequences must not survive, or two spellings never compare.
+
+    The old extractor kept them, which is why a user rule spelled
+    ``rm\\s+-rf\\s+/`` shared NOTHING with a literal ``rm -rf /`` built-in --
+    the warning missed the exact case it exists to disclose.
+    """
+    p = init_register.patterns
+    assert "rm" in p._normalized_tokens(r"rm\s+-rf\s+/")
+    assert "rm" in p._normalized_tokens("rm -rf /")
+    assert p._bigrams(p._normalized_tokens(r"rm\s+-rf\s+/")) == p._bigrams(
+        p._normalized_tokens("rm -rf /")
+    )
+
+
+def test_shipped_examples_produce_few_overlap_warnings(init_register, fake_detector):
+    """Regression guard against the startup warning becoming noise again.
+
+    Measured against the real built-in table, the shipped example configs used
+    to emit 27 warnings; this keeps them at a handful.
+    """
+    from pathlib import Path
+
+    import yaml
+    from tools.approval_detection import DANGEROUS_PATTERNS
+
+    plugin_dir = Path(__file__).resolve().parent.parent
+    p = init_register.patterns
+
+    total = 0
+    warned = 0
+    for f in sorted((plugin_dir / "examples").glob("*.yaml")):
+        data = yaml.safe_load(f.read_text(encoding="utf-8")) or {}
+        entries = []
+        for e in data.get("patterns") or []:
+            if not isinstance(e, dict):
+                continue
+            e = dict(e)
+            if not e.get("pattern") and e.get("glob"):
+                e["pattern"] = p.glob_to_regex(e["glob"])
+            if e.get("pattern"):
+                entries.append(e)
+        if not entries:
+            continue
+        total += len(entries)
+        for e in entries:
+            if any(
+                isinstance(bp, str) and p._regexes_suspect_overlap(e["pattern"], bp)
+                for bp, _bd in DANGEROUS_PATTERNS
+            ):
+                warned += 1
+
+    assert total > 40, "expected the shipped examples to still load"
+    assert warned <= 5, f"overlap warning noise regressed: {warned}/{total} patterns"

@@ -172,6 +172,7 @@ def cmd_test(
     )
     from .patterns import (
         _normalized_variants,
+        builtin_overlaps,
         compile_all,
         get_block_patterns,
         is_allow_pattern,
@@ -217,14 +218,30 @@ def cmd_test(
 
     # Step 3: Block patterns (only if no deny match)
     block_matches: list[tuple[str, str]] = []
+    deferred = False
     if deny_match is None:
         lines.append(subheading("3. BLOCK Patterns — checked third, trigger approval prompt"))
         for regex_obj, desc in get_block_patterns():
             if any(regex_obj.search(v) for v in _normalized_variants(command)):
                 block_matches.append((regex_obj.pattern, desc))
         if block_matches:
+            # A block match that Hermes's own gate would flag anyway DEFERRS to
+            # the built-in gate rather than prompting separately. Say so here:
+            # the prompt the user actually sees shows the BUILT-IN description,
+            # not the one below, so reporting a bare MATCH would overstate what
+            # happens. This probe is exact -- unlike the startup overlap report,
+            # it asks Hermes about this specific command.
+            deferred = builtin_overlaps(command)
             for pattern_str, desc in block_matches:
-                lines.append(f"  [yellow]⚠[/yellow] MATCH: {desc}")
+                if deferred:
+                    lines.append(
+                        f"  [yellow]⚠[/yellow] MATCH: {desc} "
+                        f"[dim]— deferred: Hermes's built-in gate also flags this "
+                        f"command, so the prompt will show the built-in "
+                        f"description[/dim]"
+                    )
+                else:
+                    lines.append(f"  [yellow]⚠[/yellow] MATCH: {desc}")
                 if verbose:
                     lines.append(f"    [dim]Pattern: {pattern_str}[/dim]")
         else:
@@ -264,7 +281,13 @@ def cmd_test(
         lines.append(
             result_panel(
                 "APPROVAL PROMPT",
-                "user will see (o)nce/(s)ession/(a)lways/(d)eny",
+                (
+                    "one prompt, but shown by Hermes's BUILT-IN gate — your rule "
+                    "defers to it, so [a]lways would allowlist the built-in key, "
+                    "not your pattern"
+                    if deferred
+                    else "user will see (o)nce/(s)ession/(a)lways/(d)eny"
+                ),
                 "yellow",
             )
         )

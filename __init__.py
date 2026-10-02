@@ -297,11 +297,14 @@ def _warn_builtin_overlap() -> None:
     for description, builtin_desc in builtin_overlap_report():
         logger.warning(
             "custom-dangerous-patterns: BUILT-IN OVERLAP -- block pattern "
-            "'%s' also matches Hermes's built-in '%s'. Commands matching both "
-            "are enforced by the built-in gate, so the prompt shows the "
+            "'%s' looks similar to Hermes's built-in '%s'. Commands matching "
+            "both are enforced by the built-in gate, so the prompt shows the "
             "built-in description and granting `always` on it stops this custom "
-            "rule firing for those commands. Narrow the pattern if you want "
-            "your own description and an independent allowlist entry.",
+            "rule firing for those commands. This is a similarity estimate, not "
+            "a verdict: check a specific command with "
+            "`custom-dangerous-patterns test '<command>'`, which asks Hermes "
+            "directly. Narrow the pattern if you want your own description and "
+            "an independent allowlist entry.",
             description,
             builtin_desc,
         )
