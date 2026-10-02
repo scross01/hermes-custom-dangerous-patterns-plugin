@@ -373,11 +373,15 @@ def test_shipped_examples_produce_few_overlap_warnings(init_register, fake_detec
       "never fires" -- which would satisfy an upper bound alone.
 
     The corpus is fixtures/builtin_overlap_corpus.yaml, a verbatim subset of
-    Hermes's table (6 of 107 entries) that reproduces this exact 3 while
-    keeping the previously-noisy false-positive sources in play. It is NOT the
-    one-entry ``fake_detector`` stub: measuring noise needs a table with
-    enough entries for noise to be possible, and against that stub `warned`
-    is always 0, which would make any upper bound vacuously true.
+    Hermes's table (6 of 107 entries) that yields the same 3 while keeping the
+    previously-noisy false-positive sources in play. It is NOT the one-entry
+    ``fake_detector`` stub: measuring noise needs a table with enough entries
+    for noise to be possible, and against that stub `warned` is always 0,
+    which would make any upper bound vacuously true.
+
+    Only the 3 transfers; the 29 does not. The old rule yields 13 against this
+    subset -- see the companion test below, which asserts that headroom
+    survives so the corpus cannot be quietly blunted.
 
     An exact ``== 3`` is deliberately NOT asserted: the corpus stands in for
     a table Hermes grows upstream. A new built-in sharing a bigram should

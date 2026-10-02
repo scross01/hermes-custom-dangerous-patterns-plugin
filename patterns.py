@@ -77,12 +77,16 @@ def _regexes_suspect_overlap(a: str, b: str) -> bool:
     service" over the token `remove`. Requiring a shared bigram drops that to 3
     and keeps the pairings plausible.
 
-    Both figures are measured against the real table.
-    ``tests/test_overlap.py`` replays them against a verbatim 6-entry subset of
-    it (``tests/fixtures/builtin_overlap_corpus.yaml``), which reproduces the
-    same 3 and pins it as a two-sided bound (at most 3, at least 2) so the
-    number here cannot drift away from the shipped behaviour in either
-    direction.
+    Both figures are measured against the real table. Of the two, only the second
+    is replayed by the suite: ``tests/test_overlap.py`` runs a verbatim
+    6-entry subset of the table (``tests/fixtures/builtin_overlap_corpus.yaml``)
+    through the bigram rule and gets the same 3, which it pins as a two-sided
+    bound (at most 3, at least 2) so the number here cannot drift away from the
+    shipped behaviour in either direction. The 29 is deliberately NOT
+    reproduced by that subset -- the old rule yields 13 there -- because the
+    subset is built around the shipped behaviour, not around modelling the old
+    rule's noise at scale. 13 still sits far above the pinned bound, which is
+    what keeps the corpus discriminating.
 
     This remains a heuristic. Two spellings of the same rule can share no bigram
     at all, so a real overlap can be missed -- which is why the enforcement-time

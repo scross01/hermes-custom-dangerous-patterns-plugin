@@ -17,15 +17,25 @@
 #   * the two built-ins that produce the three genuine overlaps
 #     ("stop/delete service (sc)" and the docker-compose lifecycle rule),
 #     which stand in for the real table's genuine hits; and
-#   * four built-ins that were the ORIGINAL false-positive sources -- under
-#     the old "any shared token" rule they fired on 27 of the shipped example
-#     patterns (npm/pnpm/yarn/pip/brew uninstall pairing with
+#   * four built-ins that were among the ORIGINAL false-positive sources --
+#     under the old "any shared token" rule the FULL table fired on 29 of 48
+#     shipped example patterns (npm/pnpm/yarn/pip/brew uninstall pairing with
 #     "stop/restart hermes launchd service" over the token `remove`; the
 #     gateway/launchd rules pairing with brew over `run`/`restart`).
 #
-# Together these reproduce the real measurement exactly: 3 of 48 shipped
-# example patterns warn. If you change the corpus, re-measure against the
-# real table and update tests/test_overlap.py and the figure quoted in
+# Only the CURRENT figure transfers exactly. Measured over
+# `examples/*.yaml`, the full table gives 29 under the old rule and 3 under
+# the bigram rule; THIS subset gives 13 and 3. So the subset is built around
+# the shipped behaviour -- the number that actually reaches a user -- and is
+# deliberately not a scale model of the old rule's noise.
+#
+# The 3 is pinned as a two-sided bound (at most 3, at least 2) rather than an
+# exact value, so a future Hermes table that legitimately adds a bigram-sharing
+# built-in relaxes the bound instead of failing an unrelated PR. The 13 still
+# sits far above that bound, which is what keeps the corpus discriminating:
+# test_overlap_corpus_would_catch_a_regression_to_any_shared_token asserts
+# exactly that. If you change the corpus, re-measure against the real table
+# and update tests/test_overlap.py and the figures quoted in
 # patterns.py::_regexes_suspect_overlap.
 #
 # Provenance: copied verbatim from Hermes origin/main
