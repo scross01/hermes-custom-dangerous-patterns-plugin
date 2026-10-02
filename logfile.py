@@ -127,6 +127,8 @@ def read_match_log_entries(
                 parts.append(f"matched '{pattern_desc}' ({pattern_regex})")
                 if user_selection:
                     parts.append(f"→ user selection: {user_selection}")
+                if data.get("deferred"):
+                    parts.append("→ deferred to Hermes built-in gate")
 
                 entries.append({
                     "timestamp": ts_str,
@@ -153,6 +155,7 @@ def log_match(
     pattern_description: str,
     pattern_regex: str,
     user_selection: str | None = None,
+    deferred: bool = False,
 ) -> None:
     """Write a structured JSONL entry for a pattern match.
 
@@ -175,6 +178,10 @@ def log_match(
         user_selection: User's choice from the approval prompt, if available.
                         ``None`` for allow/deny patterns where no interactive
                         selection is involved.
+        deferred: True when a block match was handed off to Hermes's built-in
+                   gate instead of escalating (it also matched a built-in
+                   pattern). Recorded so the audit trail shows which rule was
+                   actually gating the command.
     """
     _ensure_log_dir()
     _rotate()
@@ -191,6 +198,8 @@ def log_match(
     }
     if user_selection is not None:
         entry["user_selection"] = user_selection
+    if deferred:
+        entry["deferred"] = True
 
     try:
         with open(_LOG_FILE, "a", encoding="utf-8") as f:

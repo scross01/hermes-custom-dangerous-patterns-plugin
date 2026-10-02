@@ -961,8 +961,13 @@ def test_resolve_config_path_combined_mode(tmp_path, monkeypatch):
     assert result == tmp_path / "custom-dangerous-patterns"
 
 
-def test_validate_config_refuses_catch_all_allow_pattern(caplog):
-    """A catch-all allow pattern is skipped at YAML load time with an ERROR log."""
+def test_validate_config_keeps_retired_allow_patterns(caplog):
+    """Retired allow entries stay LOADED so list/remove/enable can still see them.
+
+    They used to be dropped at load time, which made them invisible -- the
+    opposite of what retirement needs. Nothing is enforced either way now, so
+    keeping them is both safe and necessary for the operator to clean up.
+    """
     import logging
 
     from config import _validate_config
@@ -970,20 +975,18 @@ def test_validate_config_refuses_catch_all_allow_pattern(caplog):
     raw = {
         "allow_patterns": [
             {"pattern": ".*", "description": "Allow everything"},
-            {"pattern": "", "description": "Blank"},
             {"pattern": r"\bvultr\s+account\s+info\b", "description": "Vultr info"},
         ],
-        # Catch-all block/deny patterns are still permitted -- only allow is refused.
         "deny_patterns": [{"pattern": ".*", "description": "Deny everything"}],
     }
     with caplog.at_level(logging.ERROR, logger="config"):
         result = _validate_config(raw)
-    assert [e["description"] for e in result["allow_patterns"]] == ["Vultr info"]
+    assert [e["description"] for e in result["allow_patterns"]] == [
+        "Allow everything",
+        "Vultr info",
+    ]
     assert len(result["deny_patterns"]) == 1
-    assert any(
-        rec.levelno == logging.ERROR and "REFUSING catch-all allow pattern" in rec.getMessage()
-        for rec in caplog.records
-    )
+    assert not any("REFUSING" in rec.getMessage() for rec in caplog.records)
 
 
 def test_validate_config_catch_all_allow_disabled_entry_is_kept(caplog):
@@ -1000,8 +1003,8 @@ def test_validate_config_catch_all_allow_disabled_entry_is_kept(caplog):
     assert not any("REFUSING" in rec.getMessage() for rec in caplog.records)
 
 
-def test_validate_config_refuses_whitespace_padded_catch_all_allow(caplog):
-    """The check runs on the stripped pattern (what is stored and compiled)."""
+def test_validate_config_normalizes_retired_allow_pattern(caplog):
+    """Retired allow patterns are still normalized like any other entry."""
     import logging
 
     from config import _validate_config
@@ -1009,5 +1012,35 @@ def test_validate_config_refuses_whitespace_padded_catch_all_allow(caplog):
     raw = {"allow_patterns": [{"pattern": ".*  ", "description": "Padded"}]}
     with caplog.at_level(logging.ERROR, logger="config"):
         result = _validate_config(raw)
-    assert result["allow_patterns"] == []
-    assert any("REFUSING catch-all allow pattern" in rec.getMessage() for rec in caplog.records)
+    assert [e["pattern"] for e in result["allow_patterns"]] == [".*"]
+    assert not any("REFUSING" in rec.getMessage() for rec in caplog.records)
+
+
+# ---------------------------------------------------------------------------
+# Allow-pattern retirement notice (0.5.0)
+# ---------------------------------------------------------------------------
+
+
+def test_allow_retirement_notice_none_when_absent():
+    """No allow patterns -> no notice (the common case must stay quiet)."""
+    from config import allow_pattern_retirement_notice
+
+    assert allow_pattern_retirement_notice({"allow_patterns": []}, Path("/tmp/x.yaml")) is None
+
+
+def test_allow_retirement_notice_counts_active_and_total():
+    """The notice must quantify what stopped being enforced, and say what to do."""
+    from config import allow_pattern_retirement_notice
+
+    config = {
+        "allow_patterns": [
+            {"pattern": "a", "description": "A"},
+            {"pattern": "b", "description": "B", "enabled": False},
+        ]
+    }
+    notice = allow_pattern_retirement_notice(config, Path("/tmp/my.yaml"))
+    assert notice is not None
+    assert "1 active of 2 total" in notice
+    assert "/tmp/my.yaml" in notice
+    assert "command_allowlist" in notice
+    assert "remove --type allow" in notice

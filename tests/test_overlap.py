@@ -1,0 +1,284 @@
+"""Append plan-035 coverage: built-in overlap deferral, the startup overlap
+warning, and the deferred flag in the match log.
+
+Split into its own module so the existing suites stay focused.
+"""
+
+from __future__ import annotations
+
+import sys
+import types
+from unittest.mock import MagicMock
+
+import pytest
+
+BLOCK_ONLY = {
+    "patterns": [{"pattern": r"\bvultr\b", "description": "Vultr CLI"}],
+    "allow_patterns": [],
+    "deny_patterns": [],
+}
+
+DENY_AND_BLOCK = {
+    "patterns": [{"pattern": r"\becho\b", "description": "Echo"}],
+    "allow_patterns": [],
+    "deny_patterns": [{"pattern": r"\becho\s+deny\b", "description": "Deny echo"}],
+}
+
+
+@pytest.fixture
+def logfile_mod(monkeypatch, tmp_path):
+    """Load logfile.py standalone with its log path redirected to tmp_path."""
+    import importlib.util
+    from pathlib import Path
+
+    plugin_dir = Path(__file__).resolve().parent.parent
+    spec = importlib.util.spec_from_file_location("cdp_logfile", plugin_dir / "logfile.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+
+    log_dir = tmp_path / "logs"
+    log_dir.mkdir()
+    monkeypatch.setattr(mod, "_LOG_DIR", log_dir)
+    monkeypatch.setattr(mod, "_LOG_FILE", log_dir / "custom-dangerous-patterns.log")
+    return mod
+
+
+@pytest.fixture
+def fake_detector(monkeypatch):
+    """Install a controllable tools.approval_detection.detect_dangerous_command.
+
+    Returns a setter: set_detector(flag) makes the probe report flag.
+    """
+    state = {"result": (False, None, None), "calls": 0, "raises": False}
+
+    def detect(command):
+        state["calls"] += 1
+        if state["raises"]:
+            raise RuntimeError("detector exploded")
+        return state["result"]
+
+    detection = types.ModuleType("tools.approval_detection")
+    detection.detect_dangerous_command = detect
+    detection.DANGEROUS_PATTERNS = [(r"\brm\s+-rf\b", "Recursive delete")]
+    tools = types.ModuleType("tools")
+    tools.approval_detection = detection
+    monkeypatch.setitem(sys.modules, "tools", tools)
+    monkeypatch.setitem(sys.modules, "tools.approval_detection", detection)
+
+    def set_detector(flag, description="Recursive delete", key="k"):
+        state["result"] = (flag, key, description) if flag else (False, None, None)
+        state["calls"] = 0
+        state["raises"] = False
+
+    set_detector.state = state
+    return set_detector
+
+
+def _hook(init_register, config):
+    init_register.patterns.compile_all(config)
+    return init_register._make_policy_hook(
+        init_register.patterns.find_block_match,
+        init_register.patterns.find_deny_match,
+    )
+
+
+# ---------------------------------------------------------------------------
+# builtin_overlaps: the probe
+# ---------------------------------------------------------------------------
+
+
+def test_builtin_overlaps_reads_detector(init_register, fake_detector):
+    fake_detector(True)
+    assert init_register.patterns.builtin_overlaps("rm -rf /tmp/x") is True
+
+
+def test_builtin_overlaps_false_when_not_flagged(init_register, fake_detector):
+    fake_detector(False)
+    assert init_register.patterns.builtin_overlaps("ls -la") is False
+
+
+def test_builtin_overlaps_false_on_import_error(init_register, monkeypatch):
+    """No detector -> False, so the plugin escalates rather than defers blind."""
+    monkeypatch.setitem(sys.modules, "tools", types.ModuleType("tools"))
+    monkeypatch.delitem(sys.modules, "tools.approval_detection", raising=False)
+    assert init_register.patterns.builtin_overlaps("rm -rf /") is False
+
+
+def test_builtin_overlaps_false_on_detector_exception(init_register, fake_detector):
+    """A raising detector must not propagate: fails SAFE toward escalating."""
+    fake_detector(False)
+    fake_detector.state["raises"] = True
+    assert init_register.patterns.builtin_overlaps("rm -rf /") is False
+
+
+def test_builtin_overlap_probe_does_not_mutate_core_table(init_register, fake_detector):
+    """The probe is read-only. Table writes are forbidden by the catalog rule
+    and are NOT detected by `hermes plugins validate`, so this is the check."""
+    p = init_register.patterns
+    detection = sys.modules["tools.approval_detection"]
+    before = list(detection.DANGEROUS_PATTERNS)
+    compiled_before = list(getattr(detection, "DANGEROUS_PATTERNS_COMPILED", []))
+
+    p.builtin_overlaps("rm -rf /tmp/x")
+    p.builtin_overlap_report()
+
+    assert detection.DANGEROUS_PATTERNS == before
+    assert getattr(detection, "DANGEROUS_PATTERNS_COMPILED", []) == compiled_before
+
+
+# ---------------------------------------------------------------------------
+# builtin_overlap_report: the startup warning source
+# ---------------------------------------------------------------------------
+
+
+def test_overlap_report_names_both_descriptions(init_register, fake_detector):
+    init_register.patterns.compile_all(
+        {"patterns": [{"pattern": r"\brm\s+-rf\b", "description": "My rm rule"}],
+         "allow_patterns": [], "deny_patterns": []}
+    )
+    report = init_register.patterns.builtin_overlap_report()
+    assert report == [("My rm rule", "Recursive delete")]
+
+
+def test_overlap_report_empty_without_overlap(init_register, fake_detector):
+    init_register.patterns.compile_all(BLOCK_ONLY)
+    assert init_register.patterns.builtin_overlap_report() == []
+
+
+def test_overlap_report_empty_when_builtins_unavailable(init_register, monkeypatch):
+    """Must return [] rather than raise when Hermes's table is unreadable."""
+    monkeypatch.setitem(sys.modules, "tools", types.ModuleType("tools"))
+    monkeypatch.delitem(sys.modules, "tools.approval_detection", raising=False)
+    init_register.patterns.compile_all(BLOCK_ONLY)
+    assert init_register.patterns.builtin_overlap_report() == []
+
+
+def test_register_warns_once_per_overlapping_pattern(
+    monkeypatch, tmp_path, init_register, fake_detector, caplog
+):
+    """The deferral cost must be disclosed at startup, per pattern."""
+    monkeypatch.setattr(init_register.config, "load_config", lambda: {
+        "patterns": [{"pattern": r"\brm\s+-rf\b", "description": "My rm rule"}],
+        "allow_patterns": [],
+        "deny_patterns": [],
+    })
+
+    import logging
+
+    with caplog.at_level(logging.WARNING, logger="hermes_plugins._init_"):
+        init_register.register(MagicMock())
+
+    warnings = [r for r in caplog.records if "BUILT-IN OVERLAP" in r.getMessage()]
+    assert len(warnings) == 1
+    message = warnings[0].getMessage()
+    assert "My rm rule" in message
+    assert "Recursive delete" in message
+    # The message must state the consequence, not just the fact.
+    assert "always" in message
+
+
+def test_register_no_overlap_warning_when_none_overlap(
+    monkeypatch, tmp_path, init_register, fake_detector, caplog
+):
+    import logging
+
+    monkeypatch.setattr(init_register.config, "load_config", lambda: dict(BLOCK_ONLY))
+
+    with caplog.at_level(logging.WARNING, logger="hermes_plugins._init_"):
+        init_register.register(MagicMock())
+
+    assert not [r for r in caplog.records if "BUILT-IN OVERLAP" in r.getMessage()]
+
+
+# ---------------------------------------------------------------------------
+# Hook behaviour under overlap
+# ---------------------------------------------------------------------------
+
+
+def test_block_match_defers_on_builtin_overlap(init_register, fake_detector):
+    fake_detector(True)
+    hook = _hook(init_register, BLOCK_ONLY)
+    assert hook("terminal", {"command": "vultr instance list"}) is None
+
+
+def test_block_match_escalates_without_overlap(init_register, fake_detector):
+    fake_detector(False)
+    hook = _hook(init_register, BLOCK_ONLY)
+    result = hook("terminal", {"command": "vultr instance list"})
+    assert result["action"] == "approve"
+    assert result["rule_key"].startswith("cdp:")
+
+
+def test_deny_still_blocks_on_builtin_overlap(init_register, fake_detector):
+    """Deny short-circuits BEFORE the probe: a deny match must never defer."""
+    fake_detector(True)
+    hook = _hook(init_register, DENY_AND_BLOCK)
+    result = hook("terminal", {"command": "echo deny"})
+    assert result["action"] == "block"
+
+
+def test_overlap_probe_not_called_without_block_match(init_register, fake_detector):
+    """The common path costs nothing: no custom match -> no probe call."""
+    fake_detector(False)
+    hook = _hook(init_register, BLOCK_ONLY)
+    assert hook("terminal", {"command": "ls -la"}) is None
+    assert fake_detector.state["calls"] == 0
+
+
+# ---------------------------------------------------------------------------
+# Deferred flag in the match log
+# ---------------------------------------------------------------------------
+
+
+def test_deferred_match_is_logged(init_register, fake_detector, monkeypatch):
+    seen: list[tuple] = []
+    monkeypatch.setattr(init_register, "log_match", lambda *a, **k: seen.append((a, k)))
+    fake_detector(True)
+    hook = _hook(init_register, BLOCK_ONLY)
+    hook("terminal", {"command": "vultr instance list"})
+    assert seen, "a deferred match must still be logged"
+    args, kwargs = seen[0]
+    assert args[1] == "block"
+    assert kwargs.get("deferred") is True
+
+
+def test_non_deferred_match_not_flagged(init_register, fake_detector, monkeypatch):
+    seen: list[tuple] = []
+    monkeypatch.setattr(init_register, "log_match", lambda *a, **k: seen.append((a, k)))
+    fake_detector(False)
+    hook = _hook(init_register, BLOCK_ONLY)
+    hook("terminal", {"command": "vultr instance list"})
+    args, kwargs = seen[0]
+    assert kwargs.get("deferred") is False
+
+
+def test_log_match_records_deferred_field(logfile_mod):
+    """log_match writes a separate 'deferred' boolean, not a new match_type."""
+    import json
+
+    logfile = logfile_mod
+    log_file = logfile._LOG_FILE
+
+    logfile.log_match("ls", "block", "Desc", r"\bls\b", deferred=True)
+    logfile.log_match("ls", "block", "Desc", r"\bls\b")
+
+    entries = [json.loads(line) for line in log_file.read_text().splitlines() if line.strip()]
+    assert entries[0]["deferred"] is True
+    assert "deferred" not in entries[1]
+    # match_type stays in the documented three-value set.
+    assert {e["type"] for e in entries} == {"block"}
+
+
+def test_read_match_log_entries_renders_deferred(logfile_mod):
+    import json
+    from datetime import datetime
+
+    logfile = logfile_mod
+    logfile.log_match("ls", "block", "Desc", r"\bls\b", deferred=True)
+    logfile.log_match("ls", "block", "Desc", r"\bls\b")
+
+    entries = logfile.read_match_log_entries(limit=10, since_dt=datetime(2000, 1, 1))
+    assert len(entries) == 2
+    assert "deferred to Hermes built-in gate" in entries[0]["message"]
+    assert "deferred" not in entries[1]["message"]
+    assert json.dumps(entries)  # serialisable for the logs subcommand

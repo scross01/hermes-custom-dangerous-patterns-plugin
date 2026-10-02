@@ -13,6 +13,7 @@ import types
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
+from unittest.mock import patch
 
 import pytest
 
@@ -159,18 +160,81 @@ class TestFileMode:
         assert "Vultr CLI" in descs
         assert "GCP CLI" in descs
 
-    def test_add_allow_pattern(self, cli_module, hermes_home):
-        """Adding an allow pattern to a file-mode config persists to disk."""
+    def test_add_allow_pattern_refused(self, cli_module, hermes_home):
+        """``add --type allow`` is refused outright: allow patterns are retired.
+
+        Writing one would produce a config entry that LOOKS like a security
+        exemption but is never enforced, so the refusal is unconditional and
+        points at Hermes's own command_allowlist instead.
+        """
         _write_yaml(self.yaml_path(hermes_home), _config(SIMPLE_BLOCK_PATTERNS))
 
         output, exit_code = cli_module.cmd_add(
             pattern_type="allow", pattern=r"\bgcloud\s+info\b", description="GCP info",
         )
-        assert exit_code == 0
+        assert exit_code == 1
+        assert "refusing to add an allow pattern" in output.lower()
+        assert "command_allowlist" in output.lower()
+        assert "nothing was written" in output.lower()
+
+    def test_add_allow_writes_nothing(self, cli_module, hermes_home):
+        """The refusal must leave the config byte-identical."""
+        path = self.yaml_path(hermes_home)
+        _write_yaml(path, _config(SIMPLE_BLOCK_PATTERNS))
+        before = path.read_text(encoding="utf-8")
+
+        cli_module.cmd_add(
+            pattern_type="allow", pattern=r"\bgcloud\s+info\b", description="GCP info",
+        )
+
+        assert path.read_text(encoding="utf-8") == before
+        assert _read_yaml(path).get("allow_patterns", []) == []
+
+    def test_add_allow_refused_for_every_pattern_shape(self, cli_module, hermes_home):
+        """Narrow, catch-all, and padded patterns are all refused identically."""
+        _write_yaml(self.yaml_path(hermes_home), _config(SIMPLE_BLOCK_PATTERNS))
+
+        for pat in (r"\bvultr\s+info\b", ".*", "^.*$", ".*  ", r"\S+", "git|curl|dd|rm"):
+            output, exit_code = cli_module.cmd_add(
+                pattern_type="allow", pattern=pat, description="Whatever",
+            )
+            assert exit_code == 1, repr(pat)
+            assert "refusing to add an allow pattern" in output.lower()
+
+        assert _read_yaml(self.yaml_path(hermes_home)).get("allow_patterns", []) == []
+
+    def test_interactive_menu_does_not_offer_allow(self, cli_module, hermes_home, capsys):
+        """The guided ``add`` flow must not advertise the retired allow type.
+
+        ``add --type allow`` already refuses, but the interactive menu is the
+        path a human actually walks. Offering "allow" there would promise a
+        security exemption that nothing enforces.
+        """
+        _write_yaml(self.yaml_path(hermes_home), _config())
+
+        with patch("builtins.input", side_effect=["2", "", "", "", "", "", ""]):
+            cli_module.cmd_add()
+
+        out = capsys.readouterr().out.lower()
+        assert "[2] allow" not in out
+        assert "[3] deny" not in out
+        assert "[2] deny" in out
+        # It must say why the option is gone rather than silently dropping it.
+        assert "allow is retired" in out
+
+    def test_interactive_menu_legacy_3_still_maps_to_deny(self, cli_module, hermes_home):
+        """Choice "3" stays an alias for deny so old muscle memory works."""
+        _write_yaml(self.yaml_path(hermes_home), _config())
+
+        answers = iter(["3", "rm\\s+-rf\\s+/", "y"])
+        # Every remaining prompt (example, description, group, enabled,
+        # protected) takes the empty default.
+        with patch("builtins.input", side_effect=lambda _p="": next(answers, "")):
+            cli_module.cmd_add()
 
         data = _read_yaml(self.yaml_path(hermes_home))
-        assert len(data.get("allow_patterns", [])) == 1
-        assert data["allow_patterns"][0]["description"] == "GCP info"
+        assert len(data.get("deny_patterns", [])) == 1
+        assert data.get("allow_patterns", []) == []
 
     def test_add_deny_pattern(self, cli_module, hermes_home):
         """Adding a deny pattern persists to disk."""
@@ -184,69 +248,6 @@ class TestFileMode:
         data = _read_yaml(self.yaml_path(hermes_home))
         assert len(data.get("deny_patterns", [])) == 1
         assert data["deny_patterns"][0]["description"] == "Danger command"
-
-    def test_add_catch_all_allow_pattern_refused(self, cli_module, hermes_home):
-        """``add --type allow`` refuses catch-all patterns and writes nothing."""
-        _write_yaml(self.yaml_path(hermes_home), _config(SIMPLE_BLOCK_PATTERNS))
-
-        for pat in (".*", "^.+$", "(?s).*"):
-            output, exit_code = cli_module.cmd_add(
-                pattern_type="allow", pattern=pat, description="Allow everything",
-            )
-            assert exit_code == 1, pat
-            assert "refusing catch-all allow pattern" in output.lower()
-
-        data = _read_yaml(self.yaml_path(hermes_home))
-        assert data.get("allow_patterns", []) == []
-
-    def test_add_catch_all_allow_has_no_override(self, cli_module, hermes_home, monkeypatch):
-        """No prompt and no flag can write a catch-all allow entry (it would be dead on load)."""
-        _write_yaml(self.yaml_path(hermes_home), _config(SIMPLE_BLOCK_PATTERNS))
-
-        monkeypatch.setattr(cli_module.sys.stdin, "isatty", lambda: True)
-        monkeypatch.setattr("builtins.input", lambda *_a, **_k: "y")
-        for pattern in (".*", r"\S+", "git|curl|dd|rm"):
-            output, exit_code = cli_module.cmd_add(
-                pattern_type="allow", pattern=pattern, description="Allow everything",
-            )
-            assert exit_code == 1, pattern
-            assert "refusing catch-all allow pattern" in output.lower()
-            assert "no effect" in output.lower()
-            assert _read_yaml(self.yaml_path(hermes_home)).get("allow_patterns", []) == []
-        assert cli_module._refuse_catch_all_allow(r"\bvultr\s+account\s+info\b") is None
-
-    def test_add_padded_catch_all_allow_refused(self, cli_module, hermes_home):
-        """Whitespace-padded catch-alls cannot dodge the CLI gate (kilo round 2).
-
-        catch_all_reason on the raw value returns None for these (no probe
-        has two consecutive spaces; a leading space breaks fullmatch), so
-        without the strip the CLI would write a dead entry that the loader
-        refuses on next startup and that list/remove cannot see.
-        """
-        _write_yaml(self.yaml_path(hermes_home), _config(SIMPLE_BLOCK_PATTERNS))
-
-        for pattern in (".*  ", " ^.*$", "\\s*\\S+\\s*"):
-            output, exit_code = cli_module.cmd_add(
-                pattern_type="allow", pattern=pattern, description="Padded allow",
-            )
-            assert exit_code == 1, repr(pattern)
-            assert "refusing catch-all allow pattern" in output.lower()
-            assert _read_yaml(self.yaml_path(hermes_home)).get("allow_patterns", []) == []
-
-    def test_add_allow_pattern_stores_stripped(self, cli_module, hermes_home):
-        """Allow patterns are stored stripped, matching the loader's normalization."""
-        _write_yaml(self.yaml_path(hermes_home), _config(SIMPLE_BLOCK_PATTERNS))
-
-        output, exit_code = cli_module.cmd_add(
-            pattern_type="allow", pattern="  \\bvultr\\s+info\\b  ",
-            description="Vultr info padded",
-        )
-        assert exit_code == 0, output
-
-        data = _read_yaml(self.yaml_path(hermes_home))
-        entries = data.get("allow_patterns", [])
-        assert len(entries) == 1
-        assert entries[0]["pattern"] == r"\bvultr\s+info\b"
 
     # --- remove ---
 

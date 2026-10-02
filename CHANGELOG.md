@@ -1,5 +1,47 @@
 # Change Log
 
+## Unreleased
+
+- **Removed all Hermes core overrides.** The plugin no longer writes to
+  `DANGEROUS_PATTERNS` / `DANGEROUS_PATTERNS_COMPILED` and no longer rebinds
+  `tools.approval.detect_dangerous_command`, `tools.approval.check_all_command_guards`,
+  or `terminal_tool._check_all_guards_impl`. Enforcement is now a single public
+  `pre_tool_call` hook, so `hermes plugins validate` reports "no runtime rebinds of
+  Hermes core".
+- Block patterns return `{"action": "approve", "rule_key": ...}`, which routes to the
+  same `_run_approval_gate` as Tier-2 dangerous shell patterns. Once/session/always/deny,
+  the gateway `/approve` and `/deny` queue, timeout handling, and TUI/desktop/channel
+  rendering are all Hermes's and are unchanged in appearance.
+- Deny patterns keep returning `{"action": "block"}` from the same hook. They remain
+  unconditional: not bypassed by `--yolo` or `approvals.mode: off`.
+- **Custom patterns are matched with Hermes's own normalizer.** Moving matching out of
+  `DANGEROUS_PATTERNS_COMPILED` and into the plugin initially left block/deny rules matching
+  only ANSI-stripped raw text, so shell splicing that the built-in gate defeats — `rm \-rf /`,
+  `r\m -rf /`, `rm${IFS}-rf /`, line continuations — slipped past a user's rule. Matching now runs
+  against Hermes's `_command_detection_variants`, restoring parity with 0.4.x (where these rules
+  were matched by that same pipeline), and falls back to the plugin's local normalizer when Hermes
+  is absent or its internals change. `custom-dangerous-patterns test` uses the same matcher, so it
+  cannot report "no match" for a command that will actually prompt or block.
+- **Approval keys are now regex-derived.** `always` persists `plugin_rule:cdp:<hash>`
+  instead of a description-derived key. Approvals granted under 0.4.x do not carry over
+  and must be granted once; editing a pattern's *description* no longer resets them.
+- **Removed:** `allow_patterns`. No supported Hermes surface can exempt a command from
+  the approval gate — `pre_tool_call` only *adds* gates, the approval hooks
+  (`pre_approval_request`, `post_approval_response`) are observer-only, and Hermes's own
+  `command_allowlist` matches exact command text or shell globs rather than regex. Existing
+  entries are **left in place and reported as inert** (a CRITICAL log at startup; markers in
+  `list`, `info`, and `validate`) so they can be reviewed and removed with
+  `custom-dangerous-patterns remove --type allow <index>`. Nothing is ever auto-deleted from
+  your config. `add --type allow` is refused rather than writing a dead entry that looks like
+  a security exemption. `test` no longer reports an ALLOW verdict for a matching allow
+  pattern, because such a command is not exempt. The guided `add` flow no longer offers
+  `allow` as a type (it was menu option `[2]`); `deny` is now `[2]` and `[3]` is kept as
+  an alias for it. The allow-shadowing diagnostics (`_check_allow_shadowing_for_cli` and
+  its five tests) are removed, since with no way to add an allow pattern nothing could
+  trigger them.
+- For a command that should never prompt, use Hermes's own `command_allowlist` in
+  `config.yaml` (exact command text, or a glob such as `vultr account info *`).
+
 ## 0.4.5
 
 - **Security:** refuse catch-all `allow_patterns` (`.*`, `.+`, `^.*$`, `(?s).*`,

@@ -1,25 +1,30 @@
-"""custom-dangerous-patterns plugin -- inject user-defined patterns into
-Hermes's built-in dangerous command approval system.
+"""custom-dangerous-patterns plugin -- enforce user-defined patterns through
+Hermes's public ``pre_tool_call`` hook.
 
 What it does:
   1. Reads ~/.hermes/custom-dangerous-patterns.yaml
-  2. Compiles user-defined regex patterns
-  3. Appends them to DANGEROUS_PATTERNS / DANGEROUS_PATTERNS_COMPILED
-  4. Monkey-patches detect_dangerous_command() to check allow patterns first
-  5. Monkey-patches check_all_command_guards() to intercept deny patterns
+  2. Compiles user-defined regex patterns (block, deny)
+  3. Registers ONE pre_tool_call hook that:
+     - returns {"action": "block"}   for deny matches  (immediate, no prompt)
+     - returns {"action": "approve"} for block matches (escalates to Hermes's
+       own human approval gate, with a stable per-pattern rule_key)
 
-Result: custom patterns get the full once/session/always/deny approval
-flow, with no custom approval logic needed.
+Result: custom patterns get the full once/session/always/deny approval flow on
+every surface (CLI, TUI, desktop, chat channels), rendered and persisted by
+Hermes itself. The plugin implements no approval logic.
 
-Allow patterns are checked BEFORE block patterns. If a command matches
-an allow pattern, it bypasses ALL detection (custom + built-in).
-
-Deny patterns block commands immediately without an approval prompt.
-They are checked AFTER allow patterns but BEFORE block patterns.
+This plugin does NOT modify Hermes internals. It does not write to
+DANGEROUS_PATTERNS / DANGEROUS_PATTERNS_COMPILED and does not rebind any
+tools.approval function. Both are forbidden by the catalog guideline
+("No runtime overrides of Hermes core"); note that Hermes's own admission lint
+(`hermes plugins validate`) detects rebinding but NOT table writes, so passing
+that lint is necessary but not sufficient. tests/test_core_surface.py is the
+real guard.
 """
 
 from __future__ import annotations
 
+import hashlib
 import logging
 from typing import Any
 
@@ -35,98 +40,72 @@ except ImportError:
 
 def register(ctx: Any) -> None:
     """Plugin entry point. Called by Hermes at startup."""
-    from .config import load_config
+    from .config import (
+        allow_pattern_retirement_notice,
+        load_config,
+        resolve_config_path,
+    )
     from .patterns import (
         compile_all,
+        find_block_match,
+        find_deny_match,
         get_block_patterns,
-        is_allow_pattern,
-        is_deny_pattern,
+        get_deny_patterns,
     )
 
     # 1. Load and compile config
     config = load_config()
     compile_all(config)
 
-    block_count = 0
-    allow_count = 0
-    deny_count = 0
+    # Allow patterns were retired: no supported Hermes surface can express
+    # "do not apply a gate". Warn loudly (CRITICAL, not warning) so nobody
+    # believes an exemption is still in force.
+    notice = allow_pattern_retirement_notice(config, resolve_config_path())
+    if notice:
+        logger.critical("custom-dangerous-patterns: %s", notice)
 
-    # 2. Inject block patterns into DANGEROUS_PATTERNS
-    block_compiled = get_block_patterns()
-    if block_compiled:
-        from tools.approval_detection import (
-            DANGEROUS_PATTERNS,
-            DANGEROUS_PATTERNS_COMPILED,
-        )
+    # Disclose block patterns that defer to the built-in gate. Without this the
+    # deferral would be a silent enforcement change for anyone who grants
+    # "always" on the resulting prompt.
+    _warn_builtin_overlap()
 
-        # Record the original list length BEFORE we inject, so the CLI's
-        # --builtins view can slice off our injected entries and only show
-        # Hermes's true built-ins (labelled correctly as [Hermes]).
-        from . import patterns as _patterns_singleton
+    # Count what will ACTUALLY be enforced, i.e. what survived compile_all.
+    # An invalid regex is skipped there with a WARNING, so counting config
+    # entries would log "3 block patterns will request approval" for a config
+    # where only 2 are live.
+    block_count = len(get_block_patterns())
+    deny_count = len(get_deny_patterns())
 
-        _patterns_singleton.set_builtins_initial_length(len(DANGEROUS_PATTERNS))
+    # 2. Register the single enforcement hook.
+    #
+    #    Everything is enforced through this one public hook. The plugin does
+    #    NOT write to Hermes's DANGEROUS_PATTERNS tables and does NOT rebind any
+    #    tools.approval function -- both are forbidden by the catalog guideline,
+    #    and the table writes are not even detected by `hermes plugins validate`,
+    #    so a human reviewer is the only real check.
+    #
+    #    The hook is registered unconditionally so the manifest's provides_hooks
+    #    declaration matches runtime registration (Hermes doctor warns when they
+    #    disagree). With no patterns it returns None after two cheap checks.
+    ctx.register_hook("pre_tool_call", _make_policy_hook(find_block_match, find_deny_match))
 
-        for regex_obj, desc in block_compiled:
-            DANGEROUS_PATTERNS.append((regex_obj.pattern, desc))
-            DANGEROUS_PATTERNS_COMPILED.append((regex_obj, desc))
-
-        block_count = len(block_compiled)
+    if block_count:
         logger.info(
-            "custom-dangerous-patterns: injected %d block patterns into DANGEROUS_PATTERNS",
+            "custom-dangerous-patterns: %d block patterns will request approval "
+            "through Hermes's native approval gate",
             block_count,
         )
-
-        # Patch detect_dangerous_command to log block matches to the
-        # dedicated log file, even when no allow patterns exist.
-        # (When allow patterns ARE enabled, _patch_detect_function
-        # already handles block logging.)
-        allow_patterns = config.get("allow_patterns", [])
-        if not (allow_patterns and any(p.get("enabled", True) for p in allow_patterns)):
-            _patch_block_logging()
-
-    # 3. Monkey-patch detect_dangerous_command for allow patterns
-    allow_patterns = config.get("allow_patterns", [])
-    if allow_patterns and any(p.get("enabled", True) for p in allow_patterns):
-        _patch_detect_function(is_allow_pattern)
-        allow_count = len([p for p in allow_patterns if p.get("enabled", True)])
+    if deny_count:
         logger.info(
-            "custom-dangerous-patterns: patched detect_dangerous_command with %d allow patterns",
-            allow_count,
-        )
-        # Check for allow patterns that shadow built-in dangerous patterns
-        _check_allow_shadowing(config, is_allow_pattern)
-
-    # 4. Monkey-patch check_all_command_guards for deny patterns
-    deny_patterns = config.get("deny_patterns", [])
-    if deny_patterns and any(p.get("enabled", True) for p in deny_patterns):
-        # Pass allow checker so fallback path can compose allow-before-deny
-        _patch_deny_handler(is_deny_pattern, is_allow_pattern)
-        deny_count = len([p for p in deny_patterns if p.get("enabled", True)])
-        logger.info(
-            "custom-dangerous-patterns: patched check_all_command_guards with %d deny patterns",
+            "custom-dangerous-patterns: %d deny patterns will block without a prompt",
             deny_count,
         )
 
-    # 5. Always register the pre_tool_call hook so the manifest's
-    #    provides_hooks declaration matches runtime registration (Hermes
-    #    doctor warns when they disagree). The hook is a no-op when no deny
-    #    patterns are configured — it still intercepts every terminal call
-    #    but returns None without matching anything, so zero overhead beyond
-    #    one Python function call per terminal invocation.
-    #
-    #    The hook is the *primary* deny enforcement path: it fires BEFORE
-    #    the terminal tool executes, so the agent's blocked-tool handling
-    #    kicks in (skip tool, return block message to LLM). Without it, deny
-    #    patterns are only checked inside the terminal tool and the agent
-    #    treats the result as a regular error.
-    ctx.register_hook("pre_tool_call", _make_deny_hook(is_deny_pattern, is_allow_pattern))
-
-    # 6. Register CLI subcommands
+    # 3. Register CLI subcommands
     _register_cli(ctx)
 
-    if not block_count and not allow_count and not deny_count:
+    if not block_count and not deny_count:
         logger.info("custom-dangerous-patterns: no active patterns, plugin idle")
-        return
 
 
 # ---------------------------------------------------------------------------
@@ -166,244 +145,79 @@ def _register_cli(ctx: Any) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Monkey-patches
+# Enforcement hook
 # ---------------------------------------------------------------------------
 
 
-def _patch_block_logging() -> None:
-    """Wrap detect_dangerous_command to log block matches to the dedicated log file.
+def _rule_key_for(pattern_str: str) -> str:
+    """Stable per-pattern allowlist grain for the native approval gate.
 
-    Runs regardless of whether allow patterns exist. Calls _log_block_matches()
-    before falling through to the original detection.
+    Hermes namespaces this as ``plugin_rule:<rule_key>`` and persists it to
+    ``command_allowlist`` when the user chooses "always". Two traps make the
+    derivation load-bearing:
+
+    - Omitting ``rule_key`` entirely collapses EVERY custom rule on the
+      ``terminal`` tool into ``plugin_rule:terminal`` (resolve_pre_tool_block
+      passes ``details.rule_key or tool_name``), so one "always" would
+      permanently allowlist all of them.
+    - Deriving it from the description means editing a pattern's label in YAML
+      silently resets the user's permanent approval, because
+      ``request_tool_approval`` falls back to hashing the *description*.
+
+    So: hash the regex, which is the rule's identity (already the dedup key in
+    config._pattern_key). Stable across description edits, group renames,
+    enable/disable toggles, and file moves in directory mode. A user who edits
+    the regex is deliberately changing the rule and should re-approve, which
+    matches Hermes's own pattern-description-keyed semantics.
     """
-    from tools import approval
-
-    _original = approval.detect_dangerous_command
-
-    def _patched(command: str) -> tuple[bool, str | None, str | None]:
-        _log_block_matches(command)
-        return _original(command)
-
-    _patched.__name__ = "detect_dangerous_command"
-    _patched.__qualname__ = "detect_dangerous_command"
-    approval.detect_dangerous_command = _patched
+    digest = hashlib.sha256(pattern_str.encode("utf-8")).hexdigest()[:12]
+    return f"cdp:{digest}"
 
 
-def _log_allow_match(command: str) -> None:
-    """Find and log the matching allow pattern's info.
+def _log_match(
+    command: str,
+    match_type: str,
+    description: str,
+    regex: str,
+    deferred: bool = False,
+) -> None:
+    """Log a pattern match to the dedicated log file.
 
-    Silently degrades (no-op) when the ``patterns`` module is not importable
-    (e.g., in test environments without a package context).
-    """
-    try:
-        from .patterns import _allow_compiled, _normalize
-    except ImportError:
-        return
-    cmd_norm = _normalize(command)
-    for allow_re, allow_desc in _allow_compiled:
-        if allow_re.search(cmd_norm):
-            log_match(command, "allow", allow_desc, allow_re.pattern)
-            return
+    ``deferred`` marks a block match that was handed off to Hermes's built-in
+    gate instead of escalating (see :func:`_make_policy_hook`). It is recorded
+    because a deferred match is the only audit trail that a custom rule is not
+    the thing gating the command.
 
-
-def _log_block_matches(command: str) -> None:
-    """Log all matching block pattern's info.
-
-    These are logged BEFORE the approval prompt, so the user's selection
-    (once/session/always/deny) is not yet known. Capturing the selection
-    would require monkey-patching Hermes's internal prompt handler
-    (e.g. ``approval.perform_approval``), which is fragile and version-
-    dependent — the user request indicated "if possible", acknowledging
-    this limitation.
-
-    Silently degrades (no-op) when the ``patterns`` module is not importable.
+    Wraps the module-level log_match (a no-op when logfile is unavailable) so a
+    logging failure can never propagate into the hook: Hermes FAILS CLOSED on
+    hook exceptions, so a raise here would block every terminal call, not just
+    the one being matched. The blanket except is deliberate.
     """
     try:
-        from .patterns import _block_compiled, _normalize
-    except ImportError:
-        return
-    cmd_norm = _normalize(command)
-    for block_re, block_desc in _block_compiled:
-        if block_re.search(cmd_norm):
-            log_match(command, "block", block_desc, block_re.pattern)
+        log_match(command, match_type, description, regex, deferred=deferred)
+    except TypeError:
+        # log_match predates the deferred keyword; fall back to the 4-arg form.
+        try:
+            log_match(command, match_type, description, regex)
+        except Exception:
+            logger.debug("custom-dangerous-patterns: match logging failed", exc_info=True)
+    except Exception:
+        logger.debug("custom-dangerous-patterns: match logging failed", exc_info=True)
 
 
-def _log_deny_match(command: str) -> None:
-    """Find and log the matching deny pattern's info.
+def _make_policy_hook(block_checker, deny_checker):
+    """Build the single pre_tool_call hook enforcing deny + block patterns.
 
-    Silently degrades (no-op) when the ``patterns`` module is not importable.
-    """
-    try:
-        from .patterns import _deny_compiled, _normalize
-    except ImportError:
-        return
-    cmd_norm = _normalize(command)
-    for deny_re, deny_desc in _deny_compiled:
-        if deny_re.search(cmd_norm):
-            log_match(command, "deny", deny_desc, deny_re.pattern)
-            return
+    deny  -> {"action": "block",  ...}   immediate, no prompt, yolo cannot bypass
+    block -> {"action": "approve", ...}  escalates to Hermes's native gate
+    other -> None
 
+    ``block_checker``/``deny_checker`` return ``(description, regex_source)`` for
+    the first matching pattern, or None. Returning the regex source (not just
+    the description) is required for the stable rule key above.
 
-def _patch_detect_function(allow_checker) -> None:
-    """Wrap detect_dangerous_command to skip commands matching allow patterns.
-
-    This runs BEFORE check_all_command_guards(), so if we return
-    (False, None, None) the entire approval flow is bypassed for
-    allow-patterned commands.
-    """
-    from tools import approval
-
-    _original = approval.detect_dangerous_command
-
-    def _patched(command: str) -> tuple[bool, str | None, str | None]:
-        # Check allow patterns first
-        allow_match = allow_checker(command)
-        if allow_match is not None:
-            # Log the allow match with pattern details
-            _log_allow_match(command)
-            logger.debug(
-                "custom-dangerous-patterns: command exempt via allow pattern (%s): %s",
-                allow_match,
-                command[:80],
-            )
-            return (False, None, None)
-
-        # Log block pattern matches before falling through to original
-        # (the original will also find them in DANGEROUS_PATTERNS_COMPILED
-        # and trigger the approval prompt)
-        _log_block_matches(command)
-
-        # Fall through to original detection (our injected patterns are
-        # already in DANGEROUS_PATTERNS_COMPILED at this point)
-        return _original(command)
-
-    _patched.__name__ = "detect_dangerous_command"
-    _patched.__qualname__ = "detect_dangerous_command"
-    approval.detect_dangerous_command = _patched
-
-
-def _extract_guard_command(args: tuple, kwargs: dict) -> tuple[str, bool]:
-    """Best-effort extraction of the command string from a guard call.
-
-    ``check_all_command_guards`` is monkey-patched, so we must infer the
-    command from however Hermes calls it. We only accept shapes we can
-    identify confidently -- a leading positional ``str`` argument or a
-    ``command=`` keyword argument -- and return ``found=False`` for anything
-    else instead of guessing. This keeps a signature change *detectable*
-    (the caller warns and falls through to the original) rather than silently
-    skipping deny patterns or passing a non-string into the matcher (which
-    would raise and break the guard outright).
-
-    The pre_tool_call hook remains the primary deny path; this wrapper is
-    defense-in-depth.
-    """
-    if args and isinstance(args[0], str):
-        return args[0], True
-    cmd = kwargs.get("command")
-    if isinstance(cmd, str):
-        return cmd, True
-    return "", False
-
-
-def _patch_deny_handler(deny_checker, allow_checker=None) -> None:
-    """Wrap check_all_command_guards to block deny-pattern commands.
-
-    Deny patterns are checked AFTER allow patterns (handled by
-    _patch_detect_function) and BEFORE the approval prompt. When a deny
-    pattern matches, we return a blocked result directly -- no prompt.
-
-    Known limitation: deny patterns intercept BEFORE yolo/mode=off checks
-    inside the original guard function, so --yolo does not bypass deny
-    patterns. This is a structural limitation of patching at this level
-    and can only be addressed by Hermes core integration (v0.5.0).
-
-    If check_all_command_guards is not available, falls back to a combined
-    detect_dangerous_command wrapper that checks allow before deny.
-    """
-    from tools import approval
-
-    func_name = "check_all_command_guards"
-    original = getattr(approval, func_name, None)
-
-    if original is None:
-        # Fallback: if check_all_command_guards doesn't exist, apply a
-        # combined detect_dangerous_command wrapper with allow before deny.
-        logger.warning(
-            "custom-dangerous-patterns: %s not found in tools.approval -- "
-            "deny patterns will show a prompt instead of blocking silently",
-            func_name,
-        )
-        _patch_detect_function_for_deny(deny_checker, allow_checker)
-        return
-
-    def _patched(*args: Any, **kwargs: Any) -> dict[str, Any]:
-        # Extract the command from however Hermes called the guard. If the
-        # call shape is unrecognizable, warn and fall through rather than
-        # guess -- a Hermes signature change should be detectable, not a
-        # silent deny bypass (and never a crash from a non-string arg).
-        command, found = _extract_guard_command(args, kwargs)
-        if not found:
-            first_type = type(args[0]).__name__ if args else "<none>"
-            logger.warning(
-                "custom-dangerous-patterns: could not identify command "
-                "argument in check_all_command_guards call (first positional "
-                "type=%s, kwargs=%r); skipping deny patterns on this path. "
-                "Hermes signature may have changed.",
-                first_type,
-                list(kwargs.keys()),
-            )
-            return original(*args, **kwargs)
-
-        # Check deny patterns before the original guard runs.
-        deny_match = deny_checker(command)
-        if deny_match is not None:
-            # Log the deny match with pattern details
-            _log_deny_match(command)
-            logger.info(
-                "custom-dangerous-patterns: command blocked by deny pattern (%s): %s",
-                deny_match,
-                command[:80],
-            )
-            return {
-                "approved": False,
-                "message": (
-                    f"BLOCKED by deny pattern: {deny_match}\n\n"
-                    f"[custom-dangerous-patterns] This command matches a "
-                    f"deny-pattern rule and was blocked without a prompt. "
-                    f"To permit this command, disable or remove the deny "
-                    f"pattern in ~/.hermes/custom-dangerous-patterns.yaml."
-                ),
-                "pattern_keys": ["deny:" + deny_match],
-            }
-
-        return original(*args, **kwargs)
-
-    _patched.__name__ = func_name
-    _patched.__qualname__ = func_name
-    setattr(approval, func_name, _patched)
-
-    # Also patch the local alias in terminal_tool.py which imports
-    # check_all_command_guards as _check_all_guards_impl at module level.
-    # Without this, terminal_tool calls the original (unpatched) function.
-    try:
-        from tools import terminal_tool as _tt
-
-        if hasattr(_tt, "_check_all_guards_impl"):
-            _tt._check_all_guards_impl = _patched
-            logger.info(
-                "custom-dangerous-patterns: also patched terminal_tool._check_all_guards_impl"
-            )
-    except ImportError:
-        pass
-
-
-def _make_deny_hook(deny_checker, allow_checker=None):
-    """Create a pre_tool_call hook that blocks deny-pattern commands.
-
-    This hook fires BEFORE the terminal tool executes, so the agent's
-    blocked-tool handling kicks in (skip execution, return block message
-    to LLM). Without this, deny patterns are checked inside the terminal
-    tool and the agent treats the result as a regular error.
+    Ordering is deny > block, matching the documented evaluation order. Deny
+    patterns are checked first because they are unconditional and promptless.
     """
 
     def _hook(tool_name: str, args: dict, **kwargs) -> dict | None:
@@ -411,24 +225,22 @@ def _make_deny_hook(deny_checker, allow_checker=None):
             return None
 
         command = args.get("command", "")
-        if not command:
+        # A malformed arg must not raise: Hermes fails closed on hook
+        # exceptions, so a crash here would block EVERY terminal call rather
+        # than the one being matched.
+        if not command or not isinstance(command, str):
             return None
 
-        # Check allow patterns first — allow wins over deny
-        if allow_checker is not None:
-            allow_match = allow_checker(command)
-            if allow_match is not None:
-                return None
-
-        # Check deny patterns
-        deny_match = deny_checker(command)
-        if deny_match is not None:
-            # Log the deny match with pattern details
-            _log_deny_match(command)
+        # 1. Deny first: immediate block, no prompt. Not bypassed by --yolo or
+        #    approvals.mode: off, which is the documented point of a deny rule.
+        deny_hit = deny_checker(command)
+        if deny_hit is not None:
+            desc, regex = deny_hit
+            _log_match(command, "deny", desc, regex)
             return {
                 "action": "block",
                 "message": (
-                    f"BLOCKED by deny pattern: {deny_match}\n\n"
+                    f"BLOCKED by deny pattern: {desc}\n\n"
                     f"[custom-dangerous-patterns] This command matches a "
                     f"deny-pattern rule and was blocked without a prompt. "
                     f"To permit this command, disable or remove the deny "
@@ -436,101 +248,60 @@ def _make_deny_hook(deny_checker, allow_checker=None):
                 ),
             }
 
-        return None
+        # 2. Block patterns escalate to the native human approval gate.
+        block_hit = block_checker(command)
+        if block_hit is None:
+            return None
+        desc, regex = block_hit
+
+        # Defer to Hermes's own gate when it would flag this command anyway.
+        # check_all_command_guards presents custom+built-in findings as ONE
+        # prompt; escalating separately would prompt twice, and "once" on the
+        # first would not satisfy the second.
+        from .patterns import builtin_overlaps
+
+        if builtin_overlaps(command):
+            _log_match(command, "block", desc, regex, deferred=True)
+            return None
+
+        _log_match(command, "block", desc, regex)
+        return {
+            "action": "approve",
+            "message": (
+                f"Command flagged as dangerous ({desc})\n\n"
+                f"[custom-dangerous-patterns] This command matches a custom "
+                f"block pattern. Approve once, allow for this session, or "
+                f"allow permanently for this specific rule."
+            ),
+            "rule_key": _rule_key_for(regex),
+        }
 
     return _hook
 
 
-def _patch_detect_function_for_deny(deny_checker, allow_checker=None) -> None:
-    """Fallback: inject allow-then-deny check into detect_dangerous_command.
+def _warn_builtin_overlap() -> None:
+    """Warn about block patterns that will be enforced by the built-in gate.
 
-    Used when check_all_command_guards is not patchable. Creates a single
-    combined wrapper that checks allow first, then deny, then original.
-    This preserves allow-before-deny semantics even when both pattern
-    types must share the same patch point.
+    A block pattern that also matches a Hermes built-in pattern is DEFERRED to
+    the built-in gate (see :func:`_make_policy_hook`), so only one prompt
+    appears. The built-in description is shown instead of the custom one, and
+    granting ``always`` on that prompt permanently allowlists the built-in key —
+    which stops the custom rule firing for that command class.
 
-    Deny matches return (True, "DENY: ...", command) so the prompt still
-    appears but the deny reason is surfaced.
+    That trade is accepted to avoid double-prompting, but it must not be silent.
+    Users already know how to read an allow-shadowing WARNING, so this uses the
+    same shape and the same level.
     """
-    from tools import approval
+    from .patterns import builtin_overlap_report
 
-    _original = approval.detect_dangerous_command
-
-    def _patched(command: str) -> tuple[bool, str | None, str | None]:
-        # Check allow patterns first (allow wins over deny)
-        if allow_checker is not None:
-            allow_match = allow_checker(command)
-            if allow_match is not None:
-                logger.debug(
-                    "custom-dangerous-patterns: command exempt via allow pattern (%s): %s",
-                    allow_match,
-                    command[:80],
-                )
-                return (False, None, None)
-
-        # Then check deny patterns
-        deny_match = deny_checker(command)
-        if deny_match is not None:
-            # Log the deny match with pattern details
-            _log_deny_match(command)
-            logger.info(
-                "custom-dangerous-patterns: command blocked by deny pattern (%s): %s",
-                deny_match,
-                command[:80],
-            )
-            return (True, "DENY: " + deny_match, command)
-
-        return _original(command)
-
-    _patched.__name__ = "detect_dangerous_command"
-    _patched.__qualname__ = "detect_dangerous_command"
-    approval.detect_dangerous_command = _patched
-
-
-# ---------------------------------------------------------------------------
-# Allow shadowing check (v0.2.0)
-# ---------------------------------------------------------------------------
-
-
-def _check_allow_shadowing(config: dict, is_allow_pattern) -> None:
-    """Warn when allow patterns could bypass built-in dangerous patterns.
-
-    For each enabled allow pattern, checks if it matches any built-in
-    DANGEROUS_PATTERNS entry without a corresponding custom block pattern
-    covering the same built-ins. Logs a WARNING explaining the built-in
-    bypass risk. Coverage scoping and overlap heuristics live in
-    :mod:`patterns` (:func:`find_uncovered_allow_shadowing`) so the runtime
-    and CLI cannot diverge.
-    """
-    import re
-
-    from tools.approval_detection import DANGEROUS_PATTERNS_COMPILED
-
-    from . import patterns as _patterns
-    from .patterns import find_uncovered_allow_shadowing
-
-    # Reuse the list compile_all() already built (same config) so a refused
-    # catch-all is logged once per startup, not once per compile.
-    allow_compiled = _patterns._allow_compiled
-    block_raw = config.get("patterns", [])
-    block_compiled: list[re.Pattern] = []
-    for entry in block_raw:
-        if not entry.get("enabled", True):
-            continue
-        try:
-            block_compiled.append(re.compile(entry["pattern"], re.IGNORECASE | re.DOTALL))
-        except re.error:
-            pass
-
-    for allow_re, allow_desc, shadowed in find_uncovered_allow_shadowing(
-        allow_compiled, block_compiled, DANGEROUS_PATTERNS_COMPILED
-    ):
+    for description, builtin_desc in builtin_overlap_report():
         logger.warning(
-            "custom-dangerous-patterns: ALLOW SHADOWING -- allow "
-            "pattern '%s' (%s) may bypass built-in dangerous "
-            "patterns: %s. Consider adding a corresponding custom "
-            "block pattern to scope the exemption.",
-            allow_re.pattern,
-            allow_desc,
-            ", ".join(shadowed[:3]) + ("..." if len(shadowed) > 3 else ""),
+            "custom-dangerous-patterns: BUILT-IN OVERLAP -- block pattern "
+            "'%s' also matches Hermes's built-in '%s'. Commands matching both "
+            "are enforced by the built-in gate, so the prompt shows the "
+            "built-in description and granting `always` on it stops this custom "
+            "rule firing for those commands. Narrow the pattern if you want "
+            "your own description and an independent allowlist entry.",
+            description,
+            builtin_desc,
         )
