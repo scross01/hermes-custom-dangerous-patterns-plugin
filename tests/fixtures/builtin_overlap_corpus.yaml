@@ -1,0 +1,64 @@
+# Curated stand-in for Hermes's tools/approval_detection.DANGEROUS_PATTERNS.
+#
+# WHY THIS EXISTS
+# ---------------
+# The startup "BUILT-IN OVERLAP" warning is estimated by comparing a user's
+# regex SOURCE against Hermes's regex SOURCES. Measuring how noisy that
+# warning is therefore requires a real built-in table -- but Hermes is not
+# importable from the test suite (no host package on sys.path), so the suite
+# stubs it. A one-entry stub makes any count assertion vacuous: `warned` is
+# always 0 and `<= 5` can never fail.
+#
+# Plan 020 / CHANGELOG 0.4.x deliberately stopped shipping a full bundled
+# snapshot of Hermes's table, so vendoring all 107 entries here would undo
+# that. Instead this is a MINIMAL, SCAN-SAFE subset chosen for what it
+# exercises, not for completeness:
+#
+#   * the two built-ins that produce the three genuine overlaps
+#     ("stop/delete service (sc)" and the docker-compose lifecycle rule),
+#     which stand in for the real table's genuine hits; and
+#   * four built-ins that were among the ORIGINAL false-positive sources --
+#     under the old "any shared token" rule the FULL table fired on 29 of 48
+#     shipped example patterns (npm/pnpm/yarn/pip/brew uninstall pairing with
+#     "stop/restart hermes launchd service" over the token `remove`; the
+#     gateway/launchd rules pairing with brew over `run`/`restart`).
+#
+# Only the CURRENT figure transfers exactly. Measured over
+# `examples/*.yaml`, the full table gives 29 under the old rule and 3 under
+# the bigram rule; THIS subset gives 13 and 3. So the subset is built around
+# the shipped behaviour -- the number that actually reaches a user -- and is
+# deliberately not a scale model of the old rule's noise.
+#
+# The 3 is pinned as a two-sided bound (at most 3, at least 2) rather than an
+# exact value, so a future Hermes table that legitimately adds a bigram-sharing
+# built-in relaxes the bound instead of failing an unrelated PR. The 13 still
+# sits far above that bound, which is what keeps the corpus discriminating:
+# test_overlap_corpus_would_catch_a_regression_to_any_shared_token asserts
+# exactly that. If you change the corpus, re-measure against the real table
+# and update tests/test_overlap.py and the figures quoted in
+# patterns.py::_regexes_suspect_overlap.
+#
+# Provenance: copied verbatim from Hermes origin/main
+# tools/approval_detection.py. Descriptions are kept because the startup
+# warning prints them and the CLI test asserts on them.
+#
+# Block style, not flow sequences: a regex alternation like (?:stop|delete)
+# contains ", " which YAML reads as a flow-sequence item separator.
+#
+#   entries: 6      (real table: 107)
+
+# --- genuine overlap sources -------------------------------------------
+- pattern: '\bsc(?:\.exe)?\s+(?:stop|delete)\b'
+  description: 'stop/delete service (sc)'
+- pattern: '\bdocker(?:-compose|\s+compose)\s+(?:-\S++(?:\s(?!-\S)\S++)?\s++)*(restart|stop|kill|down)\b'
+  description: 'docker compose restart/stop/kill/down (container lifecycle)'
+
+# --- original false-positive sources ----------------------------------
+- pattern: '\A(?=[\s\S]*\blaunchctl\s+(?:stop|kickstart|bootout|unload|kill|disable|remove)\b)(?=[\s\S]*\b(?:hermes|ai\.hermes)\b)'
+  description: 'stop/restart hermes launchd service (kills running agents)'
+- pattern: '\bnohup\b.*gateway\s+run\b'
+  description: 'start gateway outside systemd (use ''systemctl --user restart hermes-gateway'')'
+- pattern: 'gateway\s+run\b.*(&\s*$|&\s*;|\bdisown\b|\bsetsid\b)'
+  description: 'start gateway outside systemd (use ''systemctl --user restart hermes-gateway'')'
+- pattern: '(?:^|[\n`]|\$\()\s*(?:sudo\s+(?:-[^\s]+\s+)*)?(?:env\s+(?:\w+=\S*\s+)*)?(?:(?:exec|nohup|setsid|time)\s+)*\s*brew\s+(?:-[^\s]+(?:\s+[^-\s][^\s]*)?\s+)*(?:uninstall|remove|rm)\b'
+  description: 'package manager uninstall'

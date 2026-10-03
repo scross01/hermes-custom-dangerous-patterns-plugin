@@ -274,28 +274,14 @@ def _validate_pattern(entry: Any, index: int, field: str) -> dict[str, str] | No
         )
         return None
 
-    # Refuse catch-all allow patterns at load time (the runtime path). Only
-    # enabled entries are refused: a disabled catch-all is inert (compile
-    # skips it before the check), and dropping it here would hide it from
-    # ``list``/``remove``/``enable``. Check the stripped value, which is
-    # what gets stored and compiled.
-    if field == "allow_patterns" and entry.get("enabled", True) is not False:
-        try:
-            from .patterns import catch_all_reason
-        except ImportError:
-            from patterns import catch_all_reason  # type: ignore[import-untyped]
-
-        reason = catch_all_reason(pattern.strip())
-        if reason is not None:
-            logger.error(
-                "custom-dangerous-patterns: %s[%d] REFUSING catch-all allow pattern %r: "
-                "%s — skipping. Narrow the pattern to the specific command you want to exempt.",
-                field,
-                index,
-                pattern,
-                reason,
-            )
-            return None
+    # NOTE: catch-all allow patterns are no longer refused at load time.
+    #
+    # They used to be dropped here, which made them invisible to list/remove/
+    # enable. Allow patterns are now RETIRED (not enforced at all), and retired
+    # entries must stay visible so the operator can review and delete them --
+    # see allow_pattern_retirement_notice(). The refusal itself is dead weight
+    # now: nothing is enforced either way. patterns.catch_all_reason still
+    # exists and is still used by the CLI's add path and by tests.
 
     description = entry.get("description", "")
     if not isinstance(description, str):
@@ -1036,6 +1022,43 @@ def _load_raw_config_text(config_path: Path) -> str:
         return "\n".join(parts)
 
     return ""
+
+
+def allow_pattern_retirement_notice(config: dict[str, Any], config_path: Path) -> str | None:
+    """Return the operator-facing retirement notice, or None when no allow patterns exist.
+
+    Allow patterns were removed because no supported Hermes surface can express
+    "do not apply a gate":
+
+    - ``pre_tool_call`` can only ADD a gate (``approve`` / ``block`` / ``modify``)
+    - ``pre_approval_request`` and ``post_approval_response`` are observer-only;
+      their return values are ignored
+    - Hermes's ``command_allowlist`` matches exact command text or shell globs,
+      not regex
+
+    Any ``allow_patterns`` the user still has on disk are therefore INERT: the
+    commands they used to exempt will prompt or block again. Entries are
+    deliberately left in the config so the operator can review and delete them --
+    see :func:`_validate_pattern`.
+    """
+    entries = config.get("allow_patterns") or []
+    if not entries:
+        return None
+
+    active = [e for e in entries if e.get("enabled", True)]
+    return "\n".join(
+        [
+            f"ALLOW PATTERNS ARE NO LONGER ENFORCED "
+            f"({len(active)} active of {len(entries)} total).",
+            "The agent will now be asked to approve the commands these used to exempt.",
+            "Review and delete them:",
+            "  hermes custom-dangerous-patterns list --type allow",
+            "  hermes custom-dangerous-patterns remove --type allow <index>",
+            f"Config: {config_path}",
+            "To keep a command ungated, use Hermes's own command_allowlist "
+            "(exact command text or a shell glob) instead of a regex exemption.",
+        ]
+    )
 
 
 def load_config(force: bool = False, integrity_check: bool = True) -> dict[str, Any]:

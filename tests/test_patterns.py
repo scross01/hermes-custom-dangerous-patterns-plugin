@@ -732,8 +732,15 @@ def test_catch_all_reason_accepts_narrow_allow_patterns():
         assert catch_all_reason(pat) is None, pat
 
 
-def test_compile_allow_patterns_skips_catch_all_with_error(caplog):
-    """compile_allow_patterns drops catch-all entries and logs at ERROR."""
+def test_compile_allow_patterns_skips_catch_all_without_error(caplog):
+    """Catch-all allow patterns are skipped, but NOT reported as an error.
+
+    Allow patterns are retired: nothing here is enforced, so a catch-all entry
+    cannot disable anything and "REFUSING" would be a false statement. Emitting
+    ERROR on every startup would read as a broken config to anyone upgrading
+    with an old allow entry still in place. The retirement CRITICAL notice in
+    register() is the disclosure that matters.
+    """
     import logging
 
     from patterns import compile_allow_patterns
@@ -742,10 +749,96 @@ def test_compile_allow_patterns_skips_catch_all_with_error(caplog):
         {"pattern": ".*", "description": "Allow everything"},
         {"pattern": r"\bvultr\s+account\s+info\b", "description": "Vultr info"},
     ]
-    with caplog.at_level(logging.ERROR, logger="patterns"):
+    with caplog.at_level(logging.WARNING, logger="patterns"):
         compiled = compile_allow_patterns(raw)
     assert [desc for _, desc in compiled] == ["Vultr info"]
-    assert any(
-        rec.levelno == logging.ERROR and "REFUSING allow pattern" in rec.getMessage()
-        for rec in caplog.records
+    assert not [r for r in caplog.records if r.levelno >= logging.WARNING], (
+        "a retired catch-all allow entry must not produce WARNING/ERROR noise"
     )
+
+
+# ---------------------------------------------------------------------------
+# _normalized_variants -- evasion parity with Hermes's own matcher
+# ---------------------------------------------------------------------------
+
+
+def test_normalized_variants_falls_back_to_local_normalize(monkeypatch):
+    """With Hermes absent (CLI/tests), the local normalizer is still used."""
+    import sys
+
+    import patterns as patterns_mod
+
+    monkeypatch.setitem(sys.modules, "tools.approval_detection", None)
+    variants = patterns_mod._normalized_variants("echo hi")
+    assert variants, "must always yield at least one variant"
+    assert "echo hi" in variants
+
+
+def test_normalized_variants_survives_broken_hermes(monkeypatch):
+    """A raising Hermes helper degrades to the local normalizer, never raises.
+
+    The matcher runs inside the pre_tool_call hook, and Hermes fails closed on
+    hook exceptions -- a raise here would block EVERY terminal call.
+    """
+    import sys
+    import types as _types
+
+    import patterns as patterns_mod
+
+    broken = _types.ModuleType("tools.approval_detection")
+
+    def _boom(_command):
+        raise RuntimeError("hermes internals changed")
+        yield  # pragma: no cover
+
+    broken._command_detection_variants = _boom
+    monkeypatch.setitem(sys.modules, "tools.approval_detection", broken)
+
+    variants = patterns_mod._normalized_variants("echo hi")
+    assert "echo hi" in variants
+
+
+def test_find_match_uses_hermes_variants_not_raw_text(monkeypatch):
+    """A shell-escaped command must still match the rule the user wrote.
+
+    Regression guard for the hook migration: custom block/deny rules used to be
+    appended to DANGEROUS_PATTERNS_COMPILED and matched by Hermes's normalizer.
+    Matching them here over raw text let `rm \\-rf /home` slip past a rule
+    spelled `rm\\s+-rf\\s+/`, which the built-in gate catches.
+    """
+    import sys
+    import types as _types
+
+    import patterns as patterns_mod
+
+    hermes = _types.ModuleType("tools.approval_detection")
+    # Emulate Hermes's normalizer collapsing a backslash escape.
+    hermes._command_detection_variants = lambda cmd: [cmd.replace("\\", "")]
+    monkeypatch.setitem(sys.modules, "tools.approval_detection", hermes)
+
+    escaped = "rm \\-rf /tmp/scan-safe-target"
+
+    patterns_mod._block_compiled = patterns_mod.compile_block_patterns(
+        [{"pattern": r"rm\s+-rf\s+/", "description": "Dangerous recursive delete"}]
+    )
+    assert patterns_mod.find_block_match(escaped) is not None, (
+        "backslashed command evaded the user's own block rule"
+    )
+
+    patterns_mod._deny_compiled = patterns_mod.compile_deny_patterns(
+        [{"pattern": r"rm\s+-rf\s+/", "description": "Deny recursive delete"}]
+    )
+    assert patterns_mod.find_deny_match(escaped) is not None
+
+    # A command no rule covers must still not match.
+    assert patterns_mod.find_block_match("echo harmless") is None
+
+
+def test_find_block_match_cleans_up_module_state():
+    """Guard against the shared _block_compiled leaking between tests."""
+    import patterns as patterns_mod
+
+    patterns_mod._block_compiled = []
+    patterns_mod._deny_compiled = []
+    assert patterns_mod.find_block_match("rm -rf /") is None
+    assert patterns_mod.find_deny_match("rm -rf /") is None

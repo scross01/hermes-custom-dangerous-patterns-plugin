@@ -61,10 +61,10 @@ def cmd_list(
     lines.append(path_info("Config", path_display))
     lines.append("")
 
-    sections: list[tuple[str, str, list[dict[str, Any]]]] = [
-        ("BLOCK", "patterns", config.get("patterns", [])),
-        ("ALLOW", "allow_patterns", config.get("allow_patterns", [])),
-        ("DENY", "deny_patterns", config.get("deny_patterns", [])),
+    sections: list[tuple[str, str, list[dict[str, Any]], bool]] = [
+        ("BLOCK", "patterns", config.get("patterns", []), False),
+        ("ALLOW", "allow_patterns", config.get("allow_patterns", []), True),
+        ("DENY", "deny_patterns", config.get("deny_patterns", []), False),
     ]
 
     # Section colour mapping
@@ -73,7 +73,7 @@ def cmd_list(
     flat_index = 0
     total_shown = 0
 
-    for section_label, _config_key, entries in sections:
+    for section_label, _config_key, entries, retired in sections:
         filtered = list(entries)
         if pattern_type and pattern_type.upper() != section_label:
             continue
@@ -111,13 +111,19 @@ def cmd_list(
             parts.append(f"[dim]({disabled_count} disabled)[/dim]")
 
         lines.append(" ".join(parts))
+        if retired:
+            parts_line = " ".join(parts) + " [dim](retired — no longer enforced)[/dim]"
+            lines[-1] = parts_line
 
         for entry in filtered:
             flat_index += 1
             is_enabled = entry.get("enabled", True)
             desc = entry.get("description", entry.get("pattern", ""))
             grp = entry.get("group", "")
-            lines.append(pattern_entry(flat_index, is_enabled, desc, grp))
+            entry_line = pattern_entry(flat_index, is_enabled, desc, grp)
+            if retired:
+                entry_line += " [dim]⚠ INERT[/dim]"
+            lines.append(entry_line)
             total_shown += 1
 
     has_any_patterns = any(
@@ -148,13 +154,30 @@ def cmd_test(
 
     Simulates the exact evaluation order used at runtime:
       1. Deny patterns (block immediately, no prompt)
-      2. Allow patterns (exempt from all checks)
-      3. Block patterns (trigger approval prompt)
-      4. Built-in patterns (alongside block patterns)
+      2. Block patterns (trigger approval prompt)
+      3. Built-in patterns (alongside block patterns)
+
+    Allow patterns are RETIRED and are shown for visibility only. They are
+    deliberately excluded from the verdict: reporting "ALLOW" would be a lie,
+    because such a command is no longer exempt.
     """
     from .config import load_config, resolve_config_path
-    from .display import muted, path_info, result_panel, subheading, success
-    from .patterns import compile_all, get_block_patterns, is_allow_pattern, is_deny_pattern
+    from .display import (
+        muted,
+        path_info,
+        result_panel,
+        subheading,
+        success,
+        warn_mark,
+    )
+    from .patterns import (
+        _normalized_variants,
+        builtin_overlaps,
+        compile_all,
+        get_block_patterns,
+        is_allow_pattern,
+        is_deny_pattern,
+    )
 
     if not command or not command.strip():
         return ("[error]✗[/error] Error: command must not be empty.\n", 1)
@@ -181,25 +204,44 @@ def cmd_test(
     else:
         lines.append(muted("  (no matches)"))
 
-    # Step 2: Allow patterns
+    # Step 2: Allow patterns (RETIRED — shown for visibility, never enforced)
     allow_match = is_allow_pattern(command)
-    lines.append(subheading("2. ALLOW Patterns — checked second, exempt from all checks"))
+    lines.append(
+        subheading("2. ALLOW Patterns — [dim]retired, NOT enforced[/dim]")
+    )
     if allow_match:
-        lines.append(success(f"MATCH: {allow_match}"))
+        lines.append(
+            f"  [yellow]⚠[/yellow] WOULD HAVE EXEMPTED (no longer enforced): {allow_match}"
+        )
     else:
         lines.append(muted("  (no matches)"))
 
     # Step 3: Block patterns (only if no deny match)
     block_matches: list[tuple[str, str]] = []
+    deferred = False
     if deny_match is None:
         lines.append(subheading("3. BLOCK Patterns — checked third, trigger approval prompt"))
         for regex_obj, desc in get_block_patterns():
-            cmd_normalized = _normalize_for_test(command)
-            if regex_obj.search(cmd_normalized):
+            if any(regex_obj.search(v) for v in _normalized_variants(command)):
                 block_matches.append((regex_obj.pattern, desc))
         if block_matches:
+            # A block match that Hermes's own gate would flag anyway DEFERRS to
+            # the built-in gate rather than prompting separately. Say so here:
+            # the prompt the user actually sees shows the BUILT-IN description,
+            # not the one below, so reporting a bare MATCH would overstate what
+            # happens. This probe is exact -- unlike the startup overlap report,
+            # it asks Hermes about this specific command.
+            deferred = builtin_overlaps(command)
             for pattern_str, desc in block_matches:
-                lines.append(f"  [yellow]⚠[/yellow] MATCH: {desc}")
+                if deferred:
+                    lines.append(
+                        f"  [yellow]⚠[/yellow] MATCH: {desc} "
+                        f"[dim]— deferred: Hermes's built-in gate also flags this "
+                        f"command, so the prompt will show the built-in "
+                        f"description[/dim]"
+                    )
+                else:
+                    lines.append(f"  [yellow]⚠[/yellow] MATCH: {desc}")
                 if verbose:
                     lines.append(f"    [dim]Pattern: {pattern_str}[/dim]")
         else:
@@ -207,17 +249,33 @@ def cmd_test(
     else:
         lines.append(subheading("3. BLOCK Patterns — [dim]skipped (deny already matched)[/dim]"))
 
-    # Step 4: Built-in patterns
+    # Step 4: Built-in patterns.
+    #
+    # Resolved ONCE and reused by the verdict. `None` means Hermes's table
+    # could not be read at all -- which is NOT "no built-ins matched", and must
+    # never be collapsed into one. Outside Hermes the old `or []` did exactly
+    # that, so `test 'rm -rf /'` printed "built-in patterns unavailable" and
+    # then reported PASS: an overclaim, in the unsafe direction.
+    builtin_matches = None if skip_builtins else _check_builtins_for_test(command, verbose)
+    # Distinguish "user opted out of built-ins" (PASS is then legitimate) from
+    # "Hermes's table could not be read" (PASS would be an overclaim).
+    builtins_unavailable = not skip_builtins and builtin_matches is None
+
     if not skip_builtins:
         lines.append(subheading("4. BUILT-IN Patterns — checked alongside block patterns"))
-        builtin_matches = _check_builtins_for_test(command, verbose)
-        if builtin_matches:
+        if builtin_matches is None:
+            lines.append(muted("  (built-in patterns unavailable — run inside Hermes)"))
+        elif builtin_matches:
             for bm in builtin_matches:
                 lines.append(f"  [yellow]⚠[/yellow] MATCH: {bm}")
         else:
             lines.append(muted("  (no matches)"))
 
     # Determine result
+    #
+    # The verdict is computed from deny -> block -> built-ins ONLY. Allow
+    # patterns are retired and deliberately excluded: reporting ALLOW here
+    # would be a lie, because the command is no longer exempt.
     lines.append("")
     if deny_match is not None:
         lines.append(
@@ -227,21 +285,29 @@ def cmd_test(
                 "red",
             )
         )
-    elif allow_match is not None:
-        lines.append(
-            result_panel(
-                "ALLOW",
-                "command runs immediately, no prompt shown",
-                "green",
-            )
-        )
-        if block_matches:
-            lines.append(muted("(Block patterns skipped — allow wins over block)"))
-    elif block_matches or (not skip_builtins and _check_builtins_for_test(command, False)):
+    elif block_matches or builtin_matches:
         lines.append(
             result_panel(
                 "APPROVAL PROMPT",
-                "user will see (o)nce/(s)ession/(a)lways/(d)eny",
+                (
+                    "one prompt, but shown by Hermes's BUILT-IN gate — your rule "
+                    "defers to it, so [a]lways would allowlist the built-in key, "
+                    "not your pattern"
+                    if deferred
+                    else "user will see (o)nce/(s)ession/(a)lways/(d)eny"
+                ),
+                "yellow",
+            )
+        )
+    elif builtins_unavailable:
+        # Built-ins were in scope but could not be read. Saying PASS here would
+        # assert we checked and found nothing, when we never managed to look.
+        lines.append(
+            result_panel(
+                "UNKNOWN",
+                "custom patterns did not match, but Hermes's built-in patterns "
+                "could not be read, so this command's real outcome is undetermined. "
+                "Re-run inside Hermes.",
                 "yellow",
             )
         )
@@ -254,42 +320,44 @@ def cmd_test(
             )
         )
 
+    if allow_match is not None:
+        lines.append("")
+        lines.append(
+            warn_mark(
+                "This command is NOT exempt. Allow patterns are retired — "
+                "the verdict above is what will actually happen."
+            )
+        )
+
     return ("\n".join(lines) + "\n", 0)
-
-
-def _normalize_for_test(command: str) -> str:
-    """Normalize a command string for pattern matching in the test command.
-
-    Mirrors the normalization in patterns._normalize but works standalone.
-    """
-    import re as _re
-    import unicodedata
-
-    cmd = command
-    try:
-        from tools.ansi_strip import strip_ansi
-
-        cmd = strip_ansi(cmd)
-    except ImportError:
-        cmd = _re.sub(r"\x1b\[[0-9;]*[a-zA-Z]", "", cmd)
-
-    cmd = cmd.replace("\x00", "")
-    cmd = unicodedata.normalize("NFKC", cmd)
-    return cmd
 
 
 def _check_builtins_for_test(
     command: str,
     verbose: bool,
-) -> list[str]:
-    """Check if the command matches any built-in patterns."""
+) -> list[str] | None:
+    """Built-in descriptions matching ``command``, or None if unavailable.
+
+    None means Hermes's pattern table could not be read at all (running outside
+    Hermes, or in unit tests) — which is NOT the same as an empty match list.
+    Callers must distinguish the two so they never report "Hermes exposes no
+    dangerous patterns" when the truth is "we could not ask".
+    """
     import re as _re
 
-    cmd = _normalize_for_test(command)
+    from .patterns import _normalized_variants
+
+    builtins = _get_builtin_patterns()
+    if builtins is None:
+        return None
+
+    # Same variants the runtime uses, so step 4 cannot under-report relative
+    # to the built-in gate that actually fires.
+    variants = _normalized_variants(command)
     matches: list[str] = []
-    for pat, desc in _get_builtin_patterns():
+    for pat, desc in builtins:
         try:
-            if _re.search(pat, cmd, _re.IGNORECASE | _re.DOTALL):
+            if any(_re.search(pat, v, _re.IGNORECASE | _re.DOTALL) for v in variants):
                 if verbose:
                     matches.append(f"{desc} (pattern: {pat})")
                 else:
@@ -383,7 +451,15 @@ def _write_init_yaml(config_dict: dict[str, Any], target: Path) -> None:
 
 
 def _build_minimal_starter_config() -> dict[str, Any]:
-    """Build a minimal starter config with [TEST] patterns only."""
+    """Build a minimal starter config with [TEST] patterns only.
+
+    Deliberately ships NO allow_patterns entry. Allow patterns were retired in
+    plan 034, and allow_pattern_retirement_notice() fires on ANY allow entry --
+    disabled included, because an inert entry still misleads whoever reads the
+    config. Since __init__.py logs that notice at CRITICAL, seeding one here
+    meant a brand-new `init` immediately emitted the upgrading-user warning
+    about its own config. An empty/absent key is the honest starter state.
+    """
     return {
         "patterns": [
             {
@@ -393,14 +469,7 @@ def _build_minimal_starter_config() -> dict[str, Any]:
                 "group": "testing",
             },
         ],
-        "allow_patterns": [
-            {
-                "pattern": r"\becho\s+allow\b",
-                "description": "[TEST] Allow echo allow",
-                "enabled": False,
-                "group": "testing",
-            },
-        ],
+        "allow_patterns": [],
         "deny_patterns": [
             {
                 "pattern": r"\becho\s+deny\b",
@@ -659,7 +728,11 @@ def _toggle_interactive(
     }
     section_labels = {
         "patterns": "BLOCK",
-        "allow_patterns": "ALLOW",
+        # Allow patterns are retired (plan 034): the entries may still exist on disk
+        # but are INERT. Say so here, exactly as `list` (INERT), the add menu
+        # ("Allow (retired)") and `test` do -- otherwise a user can enable an
+        # inert entry from this menu without being told nothing enforces it.
+        "allow_patterns": "ALLOW (retired, inert)",
         "deny_patterns": "DENY",
     }
 
@@ -833,6 +906,17 @@ def cmd_validate(
     allow_count = len(validated.get("allow_patterns", []))
     deny_count = len(validated.get("deny_patterns", []))
 
+    # Allow patterns are retired. Warn, but do NOT change the exit code: a
+    # previously-valid config must not start failing CI or any gating script.
+    if allow_count:
+        warnings.append(
+            warn_mark(
+                f"[yellow]allow[{allow_count}][/yellow] retired: allow patterns are "
+                f"no longer enforced. These entries are inert; remove them with "
+                f"`custom-dangerous-patterns remove --type allow <index>`."
+            )
+        )
+
     # Check for regex warnings
     for section_key, section_label in [
         ("patterns", "block"),
@@ -963,7 +1047,7 @@ def cmd_info() -> tuple[str, int]:
     lines.append(subheading("Pattern Counts"))
     count_sections = [
         ("Block", "patterns"),
-        ("Allow", "allow_patterns"),
+        ("Allow (retired)", "allow_patterns"),
         ("Deny", "deny_patterns"),
     ]
     for label, key in count_sections:
@@ -1109,10 +1193,11 @@ def cmd_add(
     Use --target FILENAME to write to a specific YAML file in the config
     directory (requires directory mode; file extension must be .yaml).
 
-    Catch-all allow patterns (``.*``, ``^.+$``, empty, or anything that
-    matches every built-in dangerous-command example) are refused
-    unconditionally -- the config loader and the runtime refuse them too,
-    so there is no flag to override the refusal.
+    Allow patterns are refused outright (``_refuse_allow_add``): they were
+    retired because no supported Hermes surface can exempt a command from the
+    approval gate, so a new allow entry would be dead weight in the user's
+    config. Retired entries still load so ``list``/``remove``/``enable`` can
+    report and delete them.
     """
     from .config import load_config, resolve_config_path
     from .patterns import glob_to_regex
@@ -1198,7 +1283,7 @@ def _add_interactive(
     """Guided interactive pattern entry with glob-to-regex support.
 
     Flow:
-      1. Pattern type (block/allow/deny)
+      1. Pattern type (block/deny — "allow" was retired, see _refuse_allow_add)
       2. Glob entry → auto-generate regex → confirm/edit
       3. Optional example testing with validation loop
       4. Description, group, enabled, protected
@@ -1208,18 +1293,20 @@ def _add_interactive(
     print()
     print("Pattern type:")
     print("  [1] block  — triggers approval prompt (once/session/always/deny)")
-    print("  [2] allow  — command runs immediately, no prompt")
-    print("  [3] deny   — command blocked immediately, no prompt")
+    print("  [2] deny   — command blocked immediately, no prompt")
+    print("  (allow is retired: no supported Hermes surface can exempt a command)")
 
     try:
         choice = input("Choose type [1]: ").strip() or "1"
     except (EOFError, KeyboardInterrupt):
         return ("\nCancelled.\n", 1)
 
-    type_map = {"1": "block", "2": "allow", "3": "deny"}
+    # "3" is accepted as an alias for deny so scripts and muscle memory that
+    # learned the old 1/2/3 menu keep working now that allow is gone.
+    type_map = {"1": "block", "2": "deny", "3": "deny"}
     pattern_type = type_map.get(choice)
     if not pattern_type:
-        return (f"Invalid choice: {choice}. Use 1, 2, or 3.\n", 1)
+        return (f"Invalid choice: {choice}. Use 1 or 2.\n", 1)
 
     # --- Glob entry ---
     try:
@@ -1363,35 +1450,23 @@ def _add_interactive(
     )
 
 
-def _refuse_catch_all_allow(pattern: str) -> tuple[str, int] | None:
-    """Refuse a catch-all allow pattern; return ``(output, exit_code)`` or None.
+def _refuse_allow_add() -> tuple[str, int]:
+    """Refuse ``add --type allow``: the pattern type no longer exists.
 
-    The refusal is unconditional: ``config._validate_pattern`` drops such an
-    entry at every load and ``patterns.compile_allow_patterns`` refuses it
-    again at compile time, so writing it to YAML could only ever produce a
-    dead entry that the CLI's ``list``/``remove`` would not even show.
+    Allow patterns were retired because no supported Hermes surface can exempt a
+    command from the approval gate. Writing one to YAML would produce a dead
+    entry that looks like a security exemption in the user's config but is never
+    enforced -- so this refuses loudly and points at the real alternative rather
+    than silently accepting it.
     """
-    from .patterns import catch_all_reason
-
-    reason = catch_all_reason(pattern)
-    if reason is None:
-        return None
-
-    try:
-        from rich.markup import escape as _rich_escape
-    except ImportError:
-
-        def _rich_escape(s: str) -> str:
-            return s
-
-    safe_pattern = _rich_escape(pattern)
     return (
-        f"[error]✗[/error] Refusing catch-all allow pattern '[bold]{safe_pattern}[/bold]': "
-        f"{_rich_escape(reason)}.\n"
-        "Allow patterns bypass ALL built-in and custom dangerous-command checks, and "
-        "the plugin refuses this pattern at load time as well, so adding it would have "
-        "no effect. Narrow the pattern to the specific command you want to exempt.\n"
-        "Pattern not added.\n",
+        "[error]✗[/error] Refusing to add an allow pattern: allow patterns were "
+        "removed in 0.5.0 because no supported Hermes surface can exempt a "
+        "command from the approval gate.\n"
+        "For a command that should not prompt, use Hermes's own "
+        "`command_allowlist` in config.yaml (exact command text, or a shell "
+        "glob such as `vultr account info*`).\n"
+        "Nothing was written.\n",
         1,
     )
 
@@ -1423,18 +1498,9 @@ def _add_noninteractive(
             1,
         )
 
-    # Refuse catch-all allow patterns (they disable the approval system).
-    # Normalize once for allow patterns: the loader stores pattern.strip(),
-    # and catch_all_reason on an unstripped pattern can return None (e.g.
-    # '.*  ' or ' ^.*$' dodge the probes), so the gate must see the stripped
-    # form and the stored YAML key must agree with the loader's
-    # normalization — otherwise add writes a dead entry the CLI cannot
-    # even list.
+    # Allow patterns are retired outright — see _refuse_allow_add.
     if pattern_type == "allow":
-        pattern = pattern.strip()
-        refusal = _refuse_catch_all_allow(pattern)
-        if refusal is not None:
-            return refusal
+        return _refuse_allow_add()
 
     section_key = {
         "block": "patterns",
@@ -1495,20 +1561,10 @@ def _add_noninteractive(
 
     file_info = f"  [dim]File: {target_file}[/dim]\n" if target_file else ""
 
-    shadow_warnings = ""
-    if pattern_type == "allow":
-        from .patterns import compile_all
-
-        compile_all(config)
-        sw = _check_allow_shadowing_for_cli(config)
-        if sw:
-            shadow_warnings = "\n" + "\n".join(sw) + "\n"
-
     return (
         f'[success]✓[/success] Added {pattern_type} pattern: [bold]"{description}"[/bold]\n'
         f"{file_info}"
         f"  Index: [{index}]\n"
-        f"{shadow_warnings}"
         f"{_config_update_reminder()}",
         0,
     )
@@ -1579,7 +1635,9 @@ def _remove_interactive(
     }
     section_labels = {
         "patterns": "BLOCK",
-        "allow_patterns": "ALLOW",
+        # Same retired marker as _toggle_interactive: removing an inert entry is
+        # still useful, but the menu must not imply allow patterns do anything.
+        "allow_patterns": "ALLOW (retired, inert)",
         "deny_patterns": "DENY",
     }
 
@@ -1603,6 +1661,8 @@ def _remove_interactive(
             line.append(e["description"])
             if is_protected:
                 line.append(" \U0001f512", style="bold yellow")
+            if e.get("_section") == "allow_patterns":
+                line.append(" (retired — not enforced)", style="dim yellow")
             grp = e.get("group", "")
             if grp:
                 line.append(f"  group: {grp}", style="dim")
@@ -1727,6 +1787,8 @@ def _remove_by_target(
                 is_protected = e.get("protected", False)
                 status = "[success]✓[/success]" if is_enabled else "[error]✗[/error]"
                 prot = " [bold yellow]🔒[/bold yellow]" if is_protected else ""
+                if e["_section"] == "allow_patterns":
+                    prot += " [dim yellow](retired)[/dim yellow]"
                 desc_safe = _rich_escape(e["description"])
                 lines.append(f"  [{idx}] [bold]{type_label}:[/bold] {status} {desc_safe}{prot}")
             return ("\n".join(lines) + "\n", 1)
@@ -1942,34 +2004,25 @@ def _emit(output, exit_code: int, footer: str = "") -> None:
 # dangerous-pattern reference. Resolved fresh each call.
 
 
-def _get_builtin_patterns() -> list[tuple[str, str]]:
-    """Return Hermes's built-in DANGEROUS_PATTERNS at runtime, minus any
-    patterns this plugin injected.
+def _get_builtin_patterns() -> list[tuple[str, str]] | None:
+    """Return Hermes's built-in DANGEROUS_PATTERNS at runtime, or None.
 
-    The plugin's ``register()`` appends user-defined block patterns to
-    ``DANGEROUS_PATTERNS``. If we returned the full list, the CLI's
-    ``list --builtins`` view would show those injected entries labelled
-    ``[Hermes]`` — misleading. We slice to the original length recorded
-    by ``register()`` (via :func:`patterns.get_builtins_initial_length`),
-    so only Hermes's true built-ins appear in the --builtins view.
+    Resolved fresh on each call from tools.approval_detection. This used to
+    slice off the plugin's own injected entries using a recorded initial
+    length; the plugin no longer writes to that table (writing to it is
+    forbidden by the catalog guideline), so the full list IS the built-ins.
 
-    Returns an empty list when ``tools.approval_detection`` is unavailable
-    (CLI running outside Hermes, or in unit tests). Callers must handle the
-    empty case gracefully.
+    Returns None when Hermes's table cannot be read at all (CLI running outside
+    Hermes, or in unit tests). None is deliberately distinct from an empty list:
+    "Hermes exposes no patterns" and "we could not ask" are different answers,
+    and conflating them would report a healthy install as unprotected.
     """
     try:
         from tools.approval_detection import DANGEROUS_PATTERNS
     except ImportError:
-        return []
+        return None
 
-    try:
-        from .patterns import get_builtins_initial_length
-    except ImportError:
-        initial_length = 0
-    else:
-        initial_length = get_builtins_initial_length()
-
-    return list(DANGEROUS_PATTERNS)[:initial_length]
+    return list(DANGEROUS_PATTERNS)
 
 
 def _format_builtins(
@@ -1977,8 +2030,15 @@ def _format_builtins(
 ) -> list[str]:
     """Format the built-in patterns list for display."""
     lines = ["[bold cyan]BUILT-IN patterns (Hermes):[/bold cyan]"]
+    builtins = _get_builtin_patterns()
+    if builtins is None:
+        lines.append(
+            "  [muted](built-in patterns unavailable — run inside Hermes)[/muted]"
+        )
+        return lines
+
     shown = 0
-    for pat, desc in _get_builtin_patterns():
+    for pat, desc in builtins:
         if (
             search_term
             and search_term.lower() not in desc.lower()
@@ -2014,69 +2074,14 @@ def _config_update_reminder() -> str:
     )
 
 
-# Allow-shadowing overlap helpers (_extract_tokens / _patterns_overlap) and
-# _check_allow_shadowing_for_cli's coverage scoping now live in patterns.py
-# (find_uncovered_allow_shadowing) so the CLI and runtime share one
-# implementation and cannot drift.
-
-
-def _check_allow_shadowing_for_cli(config: dict[str, Any]) -> list[str]:
-    """Check if allow patterns shadow built-in patterns, return warning messages.
-
-    CLI-safe counterpart of __init__._check_allow_shadowing(). Resolves
-    Hermes's current DANGEROUS_PATTERNS at runtime; returns no warnings
-    when tools.approval_detection is unavailable (e.g. tests). The overlap
-    heuristic and coverage scoping are shared via
-    :func:`patterns.find_uncovered_allow_shadowing` so the CLI and runtime
-    cannot drift.
-
-    Returns a list of warning strings (empty if no shadowing detected).
-    """
-    from .patterns import compile_allow_patterns, find_uncovered_allow_shadowing
-
-    allow_compiled = compile_allow_patterns(config.get("allow_patterns", []))
-    if not allow_compiled:
-        return []
-
-    block_raw = config.get("patterns", [])
-    block_compiled: list[re.Pattern] = []
-    for entry in block_raw:
-        if not entry.get("enabled", True):
-            continue
-        try:
-            block_compiled.append(re.compile(entry["pattern"], re.IGNORECASE | re.DOTALL))
-        except re.error:
-            pass
-
-    builtin_compiled: list[tuple[re.Pattern, str]] = []
-    for pat_str, desc in _get_builtin_patterns():
-        try:
-            builtin_compiled.append((re.compile(pat_str, re.IGNORECASE | re.DOTALL), desc))
-        except re.error:
-            pass
-
-    try:
-        from rich.markup import escape as _rich_escape
-    except ImportError:
-
-        def _rich_escape(s: str) -> str:
-            return s
-
-    warnings: list[str] = []
-    for allow_re, allow_desc, shadowed in find_uncovered_allow_shadowing(
-        allow_compiled, block_compiled, builtin_compiled
-    ):
-        warnings.append(
-            f"[warning]\u26a0[/warning] Allow shadowing: pattern "
-            f"'{_rich_escape(allow_re.pattern)}' "
-            f"({_rich_escape(allow_desc)}) may bypass built-in "
-            f"dangerous patterns: "
-            f"{', '.join(_rich_escape(s) for s in shadowed[:3])}"
-            f"{'...' if len(shadowed) > 3 else ''}. "
-            f"Consider adding a corresponding custom block pattern."
-        )
-
-    return warnings
+# NOTE: the allow-shadowing diagnostics that used to live here were deleted with
+# allow patterns (plan 034). Their underlying helpers remain in patterns.py --
+# find_uncovered_allow_shadowing, _patterns_overlap, _extract_tokens -- with no
+# caller outside tests/. They are retained deliberately rather than as dead
+# weight: plan 034 scoped them out as "plan 032 territory" and kept their coverage in
+# tests/test_patterns.py. Removing them here would churn three plans for no
+# behavioural gain. The startup overlap report does NOT use them; it uses
+# _regexes_suspect_overlap (patterns.py), which normalises tokens first.
 
 
 # ---------------------------------------------------------------------------

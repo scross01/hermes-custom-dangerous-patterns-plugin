@@ -1,7 +1,25 @@
-"""Pattern compilation and allow-pattern matching.
+"""Pattern compilation and command matching.
 
-Compiles raw config patterns into (compiled_regex, description) tuples
-and provides the allow-pattern check used by the monkey-patch.
+Compiles raw config patterns into (compiled_regex, description) tuples and
+provides the matchers used to decide what the pre_tool_call hook does.
+
+Two different consumers, and the distinction matters:
+
+* The HOOK calls only :func:`find_block_match` and :func:`find_deny_match`
+  (see ``__init__.py``, where they are handed to ``_make_policy_hook``).
+  Those are the only functions on the enforcement path.
+* The CLI ``test`` subcommand calls :func:`is_deny_pattern` and
+  :func:`is_allow_pattern`, which report a description for the first match.
+  They are diagnostics for that one subcommand.
+
+Allow patterns were retired in plan 034 -- no supported Hermes surface can
+express "do not apply a gate" -- but they are still COMPILED here:
+:func:`compile_all` populates ``_allow_compiled`` and :func:`is_allow_pattern`
+still reads it. What is retired is ENFORCEMENT: nothing on the hook path
+consults ``_allow_compiled``, so a compiled allow pattern gates nothing. The
+retained helpers are deliberate (see the note in cli.py) and still covered by
+tests; do not remove ``_allow_compiled`` on the assumption that allow patterns
+are gone -- it is the CLI's report path, and plan 032 still references it.
 """
 
 from __future__ import annotations
@@ -19,33 +37,130 @@ _block_compiled: list[tuple[re.Pattern, str]] = []
 _allow_compiled: list[tuple[re.Pattern, str]] = []
 _deny_compiled: list[tuple[re.Pattern, str]] = []
 
-# Length of Hermes's DANGEROUS_PATTERNS list at the moment the plugin first
-# injected its block patterns. Recorded so the CLI's --builtins view can
-# slice off the plugin's own entries and only show Hermes's true built-ins
-# (labelled correctly as [Hermes] rather than [Plugin]). 0 = plugin never
-# injected (or the CLI is running outside Hermes).
-_builtins_initial_length: int = 0
+def builtin_overlaps(command: str) -> bool:
+    """True when Hermes's own dangerous-command detector would flag ``command``.
 
+    Read-only: calls tools.approval_detection.detect_dangerous_command and
+    discards the result. It never mutates DANGEROUS_PATTERNS* — those writes are
+    forbidden by the catalog guideline and, unlike rebinds, are NOT detected by
+    `hermes plugins validate`.
 
-def set_builtins_initial_length(n: int) -> None:
-    """Record DANGEROUS_PATTERNS length before the plugin's first inject.
+    Used to decide whether a custom block match should defer to the built-in
+    gate instead of escalating separately (which would double-prompt, and
+    "once" on the first would not satisfy the second).
 
-    Called once by register() right before appending to DANGEROUS_PATTERNS.
-    The CLI reads this to slice off plugin-injected entries from --builtins.
+    Fails SAFE: any ImportError or unexpected error returns False, so the plugin
+    escalates on its own rather than silently deferring to a gate it could not
+    confirm exists.
     """
-    global _builtins_initial_length
-    _builtins_initial_length = n
+    try:
+        from tools.approval_detection import detect_dangerous_command
+    except ImportError:
+        return False
+    try:
+        is_dangerous, _key, _desc = detect_dangerous_command(command)
+    except Exception:
+        return False
+    return bool(is_dangerous)
 
 
-def get_builtins_initial_length() -> int:
-    """Return the recorded length (0 if never injected)."""
-    return _builtins_initial_length
+def _normalized_tokens(pattern: str) -> list[str]:
+    """Bare word tokens from a regex source, with regex syntax stripped.
+
+    ``_extract_tokens`` keeps escape sequences, so ``rm\\s+-rf`` yields
+    ``['rm\\\\s+', '-rf\\\\s+']`` -- which shares nothing with the literal
+    ``['rm', '-rf']`` that a hand-written or differently-spelled built-in
+    produces. Comparing those two spellings found *zero* overlap between a
+    user's ``rm\\s+-rf\\s+/`` rule and Hermes's own recursive-delete pattern.
+    Collapsing the syntax first is what makes the comparison mean anything.
+    """
+    s = re.sub(r"\\s\*\+?", " ", pattern)          # \s* \s+ \s  ->  a space
+    s = re.sub(r"\\[bBAWZdDsSwW]", " ", s)        # anchors and character classes
+    s = re.sub(r"[\\*+?.^$()\[\]{}|]", " ", s)
+    s = s.replace("\\", " ")
+    return [t for t in re.split(r"[^A-Za-z0-9_@%/.:+-]+", s) if re.search(r"[A-Za-z0-9]", t)]
+
+
+def _bigrams(tokens: list[str]) -> set[tuple[str, str]]:
+    return {(tokens[i], tokens[i + 1]) for i in range(len(tokens) - 1)}
+
+
+def _regexes_suspect_overlap(a: str, b: str) -> bool:
+    """Heuristic: two regex SOURCES plausibly match the same commands.
+
+    Compares ADJACENT token pairs rather than any shared token. A single shared
+    token is far too weak: measured against Hermes's real built-in table over
+    ``examples/*.yaml``, "any shared token" fired on 29 of 48 shipped examples,
+    pairing things like `brew install` with "stop/restart hermes launchd
+    service" over the token `remove`. Requiring a shared bigram drops that to 3
+    and keeps the pairings plausible.
+
+    Both figures are measured against the real table. Of the two, only the second
+    is replayed by the suite: ``tests/test_overlap.py`` runs a verbatim
+    6-entry subset of the table (``tests/fixtures/builtin_overlap_corpus.yaml``)
+    through the bigram rule and gets the same 3, which it pins as a two-sided
+    bound (at most 3, at least 2) so the number here cannot drift away from the
+    shipped behaviour in either direction. The 29 is deliberately NOT
+    reproduced by that subset -- the old rule yields 13 there -- because the
+    subset is built around the shipped behaviour, not around modelling the old
+    rule's noise at scale. 13 still sits far above the pinned bound, which is
+    what keeps the corpus discriminating.
+
+    This remains a heuristic. Two spellings of the same rule can share no bigram
+    at all, so a real overlap can be missed -- which is why the enforcement-time
+    probe :func:`builtin_overlaps` is the authority, and why the caller must
+    phrase its warning as a possibility rather than a fact.
+    """
+    left, right = _bigrams(_normalized_tokens(a)), _bigrams(_normalized_tokens(b))
+    if not left or not right:
+        return False
+    return bool(left & right)
+
+
+def builtin_overlap_report() -> list[tuple[str, str]]:
+    """Enabled block patterns that may overlap a Hermes built-in pattern.
+
+    Returns ``[(custom_description, builtin_description), ...]``.
+
+    Both sides are REGEX SOURCES, not commands, so they are compared with
+    :func:`_regexes_suspect_overlap` rather than matched against each other.
+    The comparison is inherently approximate in BOTH directions and this function
+    must be treated as a prompt to check, not a verdict: use
+    ``custom-dangerous-patterns test '<command>'`` for a specific command, which
+    consults the exact probe (:func:`builtin_overlaps`).
+
+    Reads tools.approval_detection.DANGEROUS_PATTERNS (read-only). Returns
+    ``[]`` (never raises) when Hermes's table is unavailable, e.g. the CLI
+    running outside Hermes or in unit tests.
+    """
+    try:
+        from tools.approval_detection import DANGEROUS_PATTERNS
+    except ImportError:
+        return []
+
+    report: list[tuple[str, str]] = []
+    for _block_re, desc in _block_compiled:
+        for builtin_pat, builtin_desc in DANGEROUS_PATTERNS:
+            if not isinstance(builtin_pat, str):
+                continue
+            if _regexes_suspect_overlap(_block_re.pattern, builtin_pat):
+                report.append((desc, builtin_desc))
+                break
+    return report
 
 
 def compile_block_patterns(raw_patterns: list[dict[str, str]]) -> list[tuple[re.Pattern, str]]:
     """Compile block patterns from config into (compiled_regex, description).
 
-    These get appended to DANGEROUS_PATTERNS / DANGEROUS_PATTERNS_COMPILED.
+    These stay INSIDE this plugin and are matched by find_block_match(). They
+    are deliberately NOT appended to DANGEROUS_PATTERNS /
+    DANGEROUS_PATTERNS_COMPILED: writing to those Hermes-owned tables is
+    forbidden by the catalog rules and by AGENTS.md, and `hermes plugins
+    validate` does not detect it (see tests/test_core_surface.py, which is the
+    real gate). Matching is done here so the hook can escalate to
+    `{"action": "approve", "rule_key": ...}` under the command normalization
+    Hermes itself uses, rather than injecting a match into Hermes's matcher.
+
     Invalid regexes are logged and skipped. Disabled patterns (enabled: false)
     are skipped without warning — they're intentionally paused.
     """
@@ -148,11 +263,16 @@ def compile_allow_patterns(raw_patterns: list[dict[str, str]]) -> list[tuple[re.
         description = entry.get("description", pattern_str)
         reason = catch_all_reason(pattern_str)
         if reason is not None:
-            logger.error(
-                "custom-dangerous-patterns: REFUSING allow pattern %r (%s): %s. "
-                "Narrow the pattern to the specific command you want to exempt.",
+            # Allow patterns are RETIRED -- nothing here is enforced any more,
+            # so "REFUSING" is a lie and ERROR would read as a broken config on
+            # every startup for anyone who still has a catch-all entry. The
+            # retirement CRITICAL notice in __init__.register is the disclosure
+            # that matters; this line just keeps the CLI's "would have exempted"
+            # preview from claiming a catch-all matched.
+            logger.debug(
+                "custom-dangerous-patterns: skipping retired allow pattern %r "
+                "(%s) in the CLI preview; allow patterns are not enforced",
                 pattern_str,
-                description,
                 reason,
             )
             continue
@@ -223,8 +343,92 @@ def is_allow_pattern(command: str) -> str | None:
     return None
 
 
+def _normalized_variants(command: str) -> list[str]:
+    """Forms of ``command`` that a pattern should be matched against.
+
+    Delegating to Hermes's own ``_command_detection_variants`` is a SECURITY
+    requirement, not a convenience. Hermes's normalizer collapses shell
+    splicing that a raw substring match would sail straight past:
+
+        "rm \\-rf /home"        -> "rm -rf /home"   (backslash escape stripped)
+        "r\\m -rf /home"       -> "rm -rf /home"
+        "rm${IFS}-rf /home"    -> "rm -rf /home"   ($IFS folded to a space)
+        "rm -rf \\" NL "/home" -> "rm -rf /home"   (line continuation collapsed)
+
+    Before the hook migration these rules were APPENDED to
+    ``DANGEROUS_PATTERNS_COMPILED`` and therefore matched by exactly this
+    pipeline. Matching them here with the plugin's own much weaker
+    :func:`_normalize` silently downgraded every custom rule to a plain regex
+    over raw text -- an evasion surface the built-ins do not have.
+
+    The plugin's own normalization is always appended as a final variant so
+    behaviour is unchanged when Hermes is absent (the CLI, unit tests) or when
+    a future Hermes renames the private helper.
+
+    Read-only, and fails soft: any import or iteration failure degrades to the
+    local normalizer alone.
+    """
+    variants: list[str] = []
+    try:
+        from tools.approval_detection import _command_detection_variants
+
+        for variant in _command_detection_variants(command):
+            if variant and variant not in variants:
+                variants.append(variant)
+    except Exception:
+        # Private helper moved/renamed, or the CLI is running outside Hermes.
+        # The local normalization below is still correct, just less thorough.
+        logger.debug(
+            "custom-dangerous-patterns: Hermes detection variants unavailable",
+            exc_info=True,
+        )
+
+    local = _normalize(command)
+    if local and local not in variants:
+        variants.append(local)
+    return variants
+
+
+def find_block_match(command: str) -> tuple[str, str] | None:
+    """First matching block pattern as ``(description, regex_source)``, or None.
+
+    The regex source is returned alongside the description because the runtime
+    hook derives the approval rule key from the regex, never from the
+    description (see __init__._rule_key_for).
+
+    Matched against :func:`_normalized_variants`, i.e. the same evasion-
+    resistant forms Hermes matches its own patterns against.
+    """
+    if not _block_compiled:
+        return None
+
+    for variant in _normalized_variants(command):
+        for block_re, desc in _block_compiled:
+            if block_re.search(variant):
+                return (desc, block_re.pattern)
+
+    return None
+
+
+def find_deny_match(command: str) -> tuple[str, str] | None:
+    """First matching deny pattern as ``(description, regex_source)``, or None.
+
+    Same contract as :func:`find_block_match`; the regex source is returned so
+    the caller can log the exact rule that fired.
+    """
+    if not _deny_compiled:
+        return None
+
+    for variant in _normalized_variants(command):
+        for deny_re, desc in _deny_compiled:
+            if deny_re.search(variant):
+                return (desc, deny_re.pattern)
+
+    return None
+
+
 def get_block_patterns() -> list[tuple[re.Pattern, str]]:
-    """Return the compiled block patterns (for injection into DANGEROUS_PATTERNS)."""
+    """Return the compiled block patterns (for the CLI's test/list views)."""
     return list(_block_compiled)
 
 
@@ -239,17 +443,13 @@ def is_deny_pattern(command: str) -> str | None:
     Called BEFORE the approval prompt. Returns the matching deny pattern's
     description if matched, or None. Unlike block patterns, deny matches
     result in immediate blocking without a prompt.
+
+    Delegates to :func:`find_deny_match` so this answer -- which
+    ``custom-dangerous-patterns test`` reports as the DENY verdict -- can never
+    disagree with what the runtime hook actually enforces.
     """
-    if not _deny_compiled:
-        return None
-
-    cmd_normalized = _normalize(command)
-
-    for deny_re, desc in _deny_compiled:
-        if deny_re.search(cmd_normalized):
-            return desc
-
-    return None
+    hit = find_deny_match(command)
+    return hit[0] if hit is not None else None
 
 
 def glob_to_regex(glob_str: str) -> str:

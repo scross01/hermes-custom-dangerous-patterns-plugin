@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import importlib.machinery
 import importlib.util
+import re
 import sys
 import types
 from pathlib import Path
@@ -329,10 +330,17 @@ def test_cmd_test_no_patterns(monkeypatch, cli_module, tmp_path):
         "get_block_patterns",
         lambda: [],
     )
+    # A readable-but-empty built-in table is what "no built-ins matched" means.
+    # Without this the table is UNREADABLE here, and PASS would be an overclaim
+    # -- the distinction this test previously got wrong.
+    monkeypatch.setattr(
+        cli_module, "_check_builtins_for_test", lambda command, verbose: []
+    )
 
     output, exit_code = cli_module.cmd_test("echo hello")
     assert exit_code == 0
     assert "PASS" in output
+    assert "UNKNOWN" not in output
 
 
 def test_cmd_test_deny_match(monkeypatch, cli_module, tmp_path):
@@ -373,8 +381,13 @@ def test_cmd_test_deny_match(monkeypatch, cli_module, tmp_path):
     assert "Force git push" in output
 
 
-def test_cmd_test_allow_match(monkeypatch, cli_module, tmp_path):
-    """cmd_test when allow pattern matches shows ALLOW result."""
+def _stub_test_command(monkeypatch, cli_module, *, allow=None, block=None, deny=None):
+    """Stub the pattern matchers cmd_test consults.
+
+    block/deny/allow are (pattern_source, description) pairs or None.
+    """
+    import re
+
     monkeypatch.setattr(
         sys.modules["hermes_plugins.config"],
         "load_config",
@@ -385,30 +398,83 @@ def test_cmd_test_allow_match(monkeypatch, cli_module, tmp_path):
         },
     )
     monkeypatch.setattr(
-        sys.modules["hermes_plugins.patterns"],
-        "compile_all",
-        lambda config: None,
+        sys.modules["hermes_plugins.patterns"], "compile_all", lambda config: None
     )
     monkeypatch.setattr(
         sys.modules["hermes_plugins.patterns"],
         "is_deny_pattern",
-        lambda cmd: None,
+        lambda cmd: deny[1] if deny else None,
     )
     monkeypatch.setattr(
         sys.modules["hermes_plugins.patterns"],
         "is_allow_pattern",
-        lambda cmd: "Read-only Vultr commands",
+        lambda cmd: allow[1] if allow else None,
     )
     monkeypatch.setattr(
         sys.modules["hermes_plugins.patterns"],
         "get_block_patterns",
-        lambda: [],
+        lambda: [(re.compile(block[0], re.IGNORECASE | re.DOTALL), block[1])] if block else [],
+    )
+
+
+def test_cmd_test_never_reports_allow_verdict(monkeypatch, cli_module, tmp_path):
+    """Allow patterns are retired: cmd_test must NEVER print an ALLOW verdict.
+
+    Reporting ALLOW would be a lie -- the command is no longer exempt. This is
+    the single most important honesty guarantee in the retirement.
+    """
+    _stub_test_command(
+        monkeypatch, cli_module, allow=(r"\bvultr\s+account\s+info\b", "Read-only Vultr")
     )
 
     output, exit_code = cli_module.cmd_test("vultr account info")
     assert exit_code == 0
-    assert "ALLOW" in output
-    assert "Read-only Vultr commands" in output
+    assert "command runs immediately" not in output
+    # "ALLOW Patterns" legitimately appears as the retired step-2 heading;
+    # what must never appear is an ALLOW VERDICT.
+    assert not re.search(r"^\s*ALLOW\s*$", output, re.MULTILINE)
+    # ...but the user is told what used to match, and that it no longer applies.
+    assert "Read-only Vultr" in output
+    assert "NOT exempt" in output
+
+
+def test_cmd_test_allow_step_says_not_enforced(monkeypatch, cli_module, tmp_path):
+    """Step 2's heading must say the section is retired."""
+    _stub_test_command(
+        monkeypatch, cli_module, allow=(r"\bvultr\s+account\s+info\b", "Read-only Vultr")
+    )
+
+    output, _ = cli_module.cmd_test("vultr account info")
+    assert "not enforced" in output.lower()
+
+
+def test_cmd_test_reports_block_verdict_despite_allow_match(monkeypatch, cli_module, tmp_path):
+    """A command matching BOTH a retired allow and a block pattern must report
+    APPROVAL PROMPT -- allow no longer suppresses anything."""
+    _stub_test_command(
+        monkeypatch,
+        cli_module,
+        allow=(r"\bvultr\b", "Read-only Vultr"),
+        block=(r"\bvultr\b", "Vultr CLI"),
+    )
+
+    output, exit_code = cli_module.cmd_test("vultr account info")
+    assert exit_code == 0
+    assert "APPROVAL PROMPT" in output
+    assert not re.search(r"^\s*ALLOW\s*$", output, re.MULTILINE)
+
+
+def test_cmd_test_reports_pass_despite_allow_match(monkeypatch, cli_module, tmp_path):
+    """Only a retired allow pattern matches -> PASS, because nothing gates it."""
+    _stub_test_command(
+        monkeypatch, cli_module, allow=(r"\bvultr\b", "Read-only Vultr")
+    )
+
+    output, exit_code = cli_module.cmd_test("vultr account info", skip_builtins=True)
+    assert exit_code == 0
+    assert "PASS" in output
+    assert not re.search(r"^\s*ALLOW\s*$", output, re.MULTILINE)
+    assert "NOT exempt" in output
 
 
 def test_cmd_test_approval_prompt(monkeypatch, cli_module, tmp_path):
@@ -674,14 +740,43 @@ def test_build_minimal_starter_config(cli_module):
     assert "allow_patterns" in config
     assert "deny_patterns" in config
     assert len(config["patterns"]) == 1
-    assert len(config["allow_patterns"]) == 1
     assert len(config["deny_patterns"]) == 1
+    # NO allow entry: allow patterns were retired (034). See
+    # test_starter_config_does_not_trip_allow_retirement_notice.
+    assert config["allow_patterns"] == []
     # All patterns should be disabled
     for entry in config["patterns"]:
         assert entry["enabled"] is False
     assert all(p["group"] == "testing" for p in config["patterns"])
-    assert all(p["group"] == "testing" for p in config["allow_patterns"])
     assert all(p["group"] == "testing" for p in config["deny_patterns"])
+
+
+def test_starter_config_does_not_trip_allow_retirement_notice(
+    cli_module, monkeypatch, tmp_path
+):
+    """A brand-new `init` must not emit the CRITICAL allow-retirement notice.
+
+    allow_pattern_retirement_notice() fires on ANY allow entry -- disabled
+    included, since an inert entry still misleads whoever reads the config --
+    and __init__.py logs it at CRITICAL. Seeding one in the starter config meant
+    a fresh install immediately produced the upgrading-user warning about its
+    own freshly written file. Verified end to end through init's real writer and
+    config loader, so this cannot regress behind a mock.
+    """
+    config_mod = sys.modules["hermes_plugins.config"]
+
+    target = tmp_path / "custom-dangerous-patterns.yaml"
+    monkeypatch.setenv("HERMES_CUSTOM_PATTERNS_PATH", str(target))
+    monkeypatch.setattr(config_mod, "_config_cache", None)
+
+    cli_module._write_init_yaml(cli_module._build_minimal_starter_config(), target)
+
+    # The written file itself must carry no allow section at all.
+    assert "allow_patterns" not in target.read_text(encoding="utf-8")
+
+    loaded = config_mod.load_config(force=True, integrity_check=False)
+    assert loaded["allow_patterns"] == []
+    assert config_mod.allow_pattern_retirement_notice(loaded, target) is None
 
 
 # ---------------------------------------------------------------------------
@@ -734,139 +829,66 @@ def test_format_builtins_with_search(cli_module, monkeypatch):
     assert any("git" in line.lower() for line in lines_filtered)
 
 
-def test_get_builtin_patterns_slices_off_injected(cli_module, monkeypatch):
-    """_get_builtin_patterns() hides plugin-injected patterns from --builtins.
+def test_get_builtin_patterns_returns_full_table(cli_module, monkeypatch):
+    """_get_builtin_patterns() returns Hermes's whole table, unsliced.
 
-    register() appends user-defined block patterns to DANGEROUS_PATTERNS at
-    startup. The CLI's --builtins view must not show them labelled [Hermes].
-    The production code path (no monkeypatch) must slice the list to the
-    pre-injection length recorded via patterns.set_builtins_initial_length().
+    The plugin no longer injects into DANGEROUS_PATTERNS (that write is
+    forbidden by the catalog guideline), so there is nothing to slice off. A
+    leftover slice would silently return [] and make --builtins look empty.
     """
     import sys
     import types
 
-    real_builtins = _SCAN_SAFE["stub_builtins"]
-    injected = [
-        (r"\bvultr\b", "user vultr block"),
-        (r"\bgcloud\b", "user gcloud block"),
-    ]
+    builtins = _SCAN_SAFE["stub_builtins"]
 
-    # Build a minimal `tools.approval_detection` package so the production
-    # `from tools.approval_detection import DANGEROUS_PATTERNS` resolves.
     tools_pkg = types.ModuleType("tools")
     detection = types.ModuleType("tools.approval_detection")
-    detection.DANGEROUS_PATTERNS = list(real_builtins) + list(injected)
+    detection.DANGEROUS_PATTERNS = list(builtins)
     tools_pkg.approval_detection = detection
     monkeypatch.setitem(sys.modules, "tools", tools_pkg)
     monkeypatch.setitem(sys.modules, "tools.approval_detection", detection)
 
-    # The cli_module is loaded as hermes_plugins.cli, so `from .patterns`
-    # inside it resolves to hermes_plugins.patterns. We must set the sentinel
-    # on that exact module instance, not on a top-level `patterns` import.
-    import hermes_plugins.patterns as _plugin_patterns
-
-    _plugin_patterns.set_builtins_initial_length(len(real_builtins))
-
     result = cli_module._get_builtin_patterns()
-    assert result == real_builtins, (
-        f"expected only the {len(real_builtins)} Hermes built-ins; "
-        f"got {len(result)} entries (the injected ones leaked through)"
+    assert result == builtins, (
+        f"expected all {len(builtins)} Hermes built-ins; got {len(result or [])}"
     )
+
+
+def test_get_builtin_patterns_none_when_unavailable(cli_module, monkeypatch):
+    """Unavailable is None, NOT [] -- the two must stay distinguishable."""
+    import sys
+    import types
+
+    monkeypatch.setitem(sys.modules, "tools", types.ModuleType("tools"))
+    monkeypatch.delitem(sys.modules, "tools.approval_detection", raising=False)
+
+    assert cli_module._get_builtin_patterns() is None
+
+
+def test_format_builtins_distinguishes_unavailable_from_empty(cli_module, monkeypatch):
+    """"Unavailable" and "no patterns match the filter" are different answers."""
+    monkeypatch.setattr(cli_module, "_get_builtin_patterns", lambda: None)
+    unavailable = "\n".join(cli_module._format_builtins())
+    assert "unavailable" in unavailable.lower()
+
+    monkeypatch.setattr(cli_module, "_get_builtin_patterns", lambda: [])
+    empty = "\n".join(cli_module._format_builtins())
+    assert "no built-in patterns match the filter" in empty
+    assert "unavailable" not in empty.lower()
+
+
+def test_check_builtins_for_test_propagates_unavailable(cli_module, monkeypatch):
+    """cmd_test's built-in step must report unavailability, not 'no matches'."""
+    monkeypatch.setattr(cli_module, "_get_builtin_patterns", lambda: None)
+    assert cli_module._check_builtins_for_test("ls -la", False) is None
+
+    monkeypatch.setattr(cli_module, "_get_builtin_patterns", lambda: [])
+    assert cli_module._check_builtins_for_test("ls -la", False) == []
 
 
 # ---------------------------------------------------------------------------
 # Allow shadowing checks
 # ---------------------------------------------------------------------------
-
-
-def test_add_allow_pattern_shadowing_warning(cli_module, monkeypatch):
-    """Broad allow pattern that shadows built-ins triggers warning."""
-    monkeypatch.setattr(cli_module, "_get_builtin_patterns", _stub_builtins)
-    config = {
-        "patterns": [],
-        "allow_patterns": [
-            {"pattern": r"\bgit\b", "description": "Allow git", "enabled": True},
-        ],
-        "deny_patterns": [],
-    }
-    warnings = cli_module._check_allow_shadowing_for_cli(config)
-    assert len(warnings) > 0
-    assert any("shadow" in w.lower() for w in warnings)
-    assert any("git" in w.lower() for w in warnings)
-
-
-def test_add_block_pattern_no_shadowing_warning(cli_module, monkeypatch):
-    """Block pattern produces no shadowing warnings."""
-    monkeypatch.setattr(cli_module, "_get_builtin_patterns", _stub_builtins)
-    config = {
-        "patterns": [
-            {"pattern": r"\bvultr\b", "description": "Vultr", "enabled": True},
-        ],
-        "allow_patterns": [],
-        "deny_patterns": [],
-    }
-    warnings = cli_module._check_allow_shadowing_for_cli(config)
-    assert len(warnings) == 0
-
-
-def test_add_allow_pattern_no_shadowing(cli_module, monkeypatch):
-    """Narrow allow pattern that doesn't shadow built-ins produces no warnings."""
-    monkeypatch.setattr(cli_module, "_get_builtin_patterns", _stub_builtins)
-    config = {
-        "patterns": [],
-        "allow_patterns": [
-            {"pattern": r"\bmyapp\s+read\b", "description": "MyApp read", "enabled": True},
-        ],
-        "deny_patterns": [],
-    }
-    warnings = cli_module._check_allow_shadowing_for_cli(config)
-    assert len(warnings) == 0
-
-
-def test_allow_shadowing_not_suppressed_by_unrelated_block(cli_module, monkeypatch):
-    """A block covering a *different* built-in must not suppress the warning.
-
-    Regression: the CLI coverage check previously flipped ``covered_by_block``
-    True if any block overlapped *any* built-in, instead of the specific
-    built-ins the allow shadows. That silenced real shadowing warnings — the
-    unsafe direction for a safety plugin. Here an allow for ``\bdocker\b``
-    shadows docker built-ins, while the block only covers the ``rm -rf`` /
-    ``dd`` built-ins. The shadowing must still be reported.
-    """
-    monkeypatch.setattr(cli_module, "_get_builtin_patterns", _stub_builtins)
-    config = {
-        "patterns": [
-            {"pattern": r"\bls\s+-la\b", "description": "ls -la block", "enabled": True},
-        ],
-        "allow_patterns": [
-            {"pattern": r"\bgit\b", "description": "Allow git", "enabled": True},
-        ],
-        "deny_patterns": [],
-    }
-    warnings = cli_module._check_allow_shadowing_for_cli(config)
-    assert len(warnings) > 0, "shadowing warning was suppressed by an unrelated block pattern"
-    assert any("git" in w.lower() for w in warnings)
-
-
-def test_allow_shadowing_suppressed_when_block_covers_same_builtins(cli_module, monkeypatch):
-    """A block that covers the same built-ins DOES suppress the warning.
-
-    Positive control for the coverage-scoping fix: an allow for
-    ``\bgit\b`` plus a block for ``\bgit\b`` (which overlaps the same
-    git built-ins) is treated as intentionally scoped — no warning.
-    """
-    monkeypatch.setattr(cli_module, "_get_builtin_patterns", _stub_builtins)
-    config = {
-        "patterns": [
-            {"pattern": r"\bgit\b", "description": "git block", "enabled": True},
-        ],
-        "allow_patterns": [
-            {"pattern": r"\bgit\b", "description": "Allow git", "enabled": True},
-        ],
-        "deny_patterns": [],
-    }
-    warnings = cli_module._check_allow_shadowing_for_cli(config)
-    assert len(warnings) == 0
 
 
 # ---------------------------------------------------------------------------
@@ -1011,3 +1033,102 @@ def test_config_content_files_directory_with_sibling(cli_module, tmp_path):
     sibling.write_text("", encoding="utf-8")
     files = cli_module._config_content_files(d)
     assert a in files and sibling in files
+
+
+def _wire_cmd_test(monkeypatch, cli_module, block_pattern=r"\bvultr\b"):
+    """Standard cmd_test wiring: one block rule, no allow/deny, fresh config."""
+    import re as _re
+
+    monkeypatch.setattr(
+        sys.modules["hermes_plugins.config"],
+        "load_config",
+        lambda force=False, integrity_check=True: {
+            "patterns": [],
+            "allow_patterns": [],
+            "deny_patterns": [],
+        },
+    )
+    monkeypatch.setattr(sys.modules["hermes_plugins.patterns"], "compile_all",
+                        lambda config: None)
+    monkeypatch.setattr(sys.modules["hermes_plugins.patterns"], "is_deny_pattern",
+                        lambda cmd: None)
+    monkeypatch.setattr(sys.modules["hermes_plugins.patterns"], "is_allow_pattern",
+                        lambda cmd: None)
+    compiled = _re.compile(block_pattern, _re.IGNORECASE | _re.DOTALL)
+    monkeypatch.setattr(sys.modules["hermes_plugins.patterns"], "get_block_patterns",
+                        lambda: [(compiled, "Vultr CLI")])
+
+
+def test_cmd_test_reports_unknown_when_builtins_unreadable(
+    monkeypatch, cli_module, tmp_path
+):
+    """Cannot-ask must never be rendered as PASS.
+
+    `_check_builtins_for_test()` returns None when Hermes's table cannot be
+    read. Collapsing that into "no match" made `test 'rm -rf /'` report
+    "no patterns matched. Command would run normally" outside Hermes -- an
+    overclaim, in the unsafe direction, directly contradicting the line the same
+    output printed three lines earlier.
+    """
+    _wire_cmd_test(monkeypatch, cli_module, block_pattern=r"\bnothing-matches-this\b")
+    monkeypatch.setattr(cli_module, "_check_builtins_for_test",
+                        lambda command, verbose: None)
+
+    output, _rc = cli_module.cmd_test("rm -rf /")
+
+    assert "UNKNOWN" in output
+    assert "no patterns matched" not in output, (
+        "must not claim PASS when the built-in table could not be read"
+    )
+    assert "built-in patterns unavailable" in output
+
+
+def test_cmd_test_still_reports_block_match_without_builtins(
+    monkeypatch, cli_module, tmp_path
+):
+    """A custom match is still knowable when the built-ins are unreadable."""
+    _wire_cmd_test(monkeypatch, cli_module)
+    monkeypatch.setattr(cli_module, "_check_builtins_for_test",
+                        lambda command, verbose: None)
+
+    output, _rc = cli_module.cmd_test("vultr instance delete")
+
+    assert "APPROVAL PROMPT" in output
+    assert "UNKNOWN" not in output
+
+
+def test_cmd_test_skip_builtins_still_reports_pass(monkeypatch, cli_module, tmp_path):
+    """Opting out of built-ins makes PASS legitimate.
+
+    `--skip-builtins` means the user asked for a custom-patterns-only answer, so
+    UNKNOWN would be wrong there: we answered exactly what was asked, and never
+    claimed to have consulted the built-ins.
+    """
+    _wire_cmd_test(monkeypatch, cli_module, block_pattern=r"\bnothing-matches-this\b")
+    monkeypatch.setattr(cli_module, "_check_builtins_for_test",
+                        lambda command, verbose: ["Recursive delete"])
+
+    output, _rc = cli_module.cmd_test("echo hi", skip_builtins=True)
+
+    assert "PASS" in output
+    assert "UNKNOWN" not in output
+
+
+def test_cmd_test_consults_builtins_once(monkeypatch, cli_module, tmp_path):
+    """Step 4 and the verdict share one result.
+
+    Recomputing it for the verdict meant the displayed matches and the verdict
+    came from two separate calls, so they could disagree.
+    """
+    calls = []
+
+    def fake(command, verbose):
+        calls.append(verbose)
+        return ["Recursive delete"]
+
+    _wire_cmd_test(monkeypatch, cli_module, block_pattern=r"\bnothing-matches-this\b")
+    monkeypatch.setattr(cli_module, "_check_builtins_for_test", fake)
+
+    cli_module.cmd_test("rm -rf /")
+
+    assert len(calls) == 1, f"built-ins consulted {len(calls)} times"

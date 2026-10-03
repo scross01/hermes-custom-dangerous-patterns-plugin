@@ -7,10 +7,9 @@
 # Test these by enabling and running:
 #   hermes custom-dangerous-patterns enable --group testing
 #
-# The three patterns create a complete test matrix:
-#   - echo allow    → matches block + allow → allow wins → no prompt
+# The two patterns create a complete test matrix:
 #   - echo deny     → matches deny           → blocked immediately
-#   - echo anything → matches block          → approval prompt
+#   - echo anything → matches block          → native approval prompt
 
 patterns:
   - pattern: '\becho\b'
@@ -19,14 +18,6 @@ patterns:
     group: testing
     examples:
       - 'echo hello'
-
-allow_patterns:
-  - pattern: '\becho\s+allow\b'
-    description: '[TEST] Allow echo allow'
-    enabled: false
-    group: testing
-    examples:
-      - 'echo allow'
 
 deny_patterns:
   - pattern: '\becho\s+deny\b'
