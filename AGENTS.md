@@ -85,6 +85,32 @@ blanket `except` in `_log_match` (a logging failure must never gate), the
 `builtin_overlaps` and `_normalized_variants`. Preserve that posture when adding
 code to the hook path.
 
+### Declare only manifest fields Hermes actually parses
+
+`plugin.yaml` keys are checked against Hermes's `_KNOWN_MANIFEST_FIELDS`
+(`hermes_cli/plugins_manifest.py`). A key outside that set is **ignored**, and because
+the manifest declares `manifest_version: 2`, every parse logs
+
+```
+Plugin custom-dangerous-patterns: unknown manifest field(s) ignored: <key>
+```
+
+at **WARNING** — noise in the operator's own Hermes log on every startup, for a
+declaration that does nothing.
+
+0.4.x shipped `provides_cli_commands: [custom-dangerous-patterns]` on the belief that
+the CLI group had to be declared. It does not, and never did: the group is registered at
+runtime by `ctx.register_cli_command(...)`, which reads nothing from the manifest. The
+field was removed in 0.5.0. Do not put it back — it is the natural thing to "restore"
+while documenting CLI registration, and it is the exact mistake already made once.
+
+`provides_hooks` *is* load-bearing: it is in the known set and it is what keeps the
+manifest honest about the hook `register()` actually registers. Keep the two in sync.
+
+`tests/test_core_surface.py` gates all three claims (no unknown keys, no phantom CLI
+field, `provides_hooks` == registered hooks). If Hermes adds a manifest field, add it to
+`_KNOWN_MANIFEST_FIELDS` in that file in the same commit.
+
 ### Tests exist under tests/
 
 The repo has a comprehensive test suite under `tests/` using pytest. Tests cover config loading/validation, pattern compilation/matching, and plugin registration logic. See the test files for coverage details.

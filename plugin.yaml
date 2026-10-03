@@ -10,8 +10,6 @@ description: >-
   The plugin modifies no Hermes internals.
 provides_hooks:
   - pre_tool_call
-provides_cli_commands:
-  - custom-dangerous-patterns
 author: Stephen Cross
 license: MIT
 python_dependencies:

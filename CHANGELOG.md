@@ -17,6 +17,15 @@ Background, ordering tables, and the reasoning behind each decision:
   or `terminal_tool._check_all_guards_impl`. Enforcement is now a single public
   `pre_tool_call` hook, so `hermes plugins validate` reports "no runtime rebinds of
   Hermes core".
+- **`plugin.yaml`: dropped the `provides_cli_commands` field.** 0.4.0 declared
+  `provides_cli_commands: [custom-dangerous-patterns]`, but Hermes has no such manifest
+  field -- `_KNOWN_MANIFEST_FIELDS` in `hermes_cli/plugins_manifest.py` has no CLI entry
+  -- so the value was ignored and, because the manifest declares `manifest_version: 2`,
+  every plugin load logged `unknown manifest field(s) ignored: provides_cli_commands` at
+  WARNING. The CLI group needs no declaration: it is registered at runtime by
+  `ctx.register_cli_command(...)`. `provides_hooks` is unchanged and still load-bearing.
+  `tests/test_core_surface.py` now fails if any manifest key is outside Hermes's known
+  set, or if `provides_hooks` drifts from the hook `register()` actually registers.
 - Block patterns return `{"action": "approve", "rule_key": ...}`, which routes to the
   same `_run_approval_gate` as Tier-2 dangerous shell patterns. Once/session/always/deny,
   the gateway `/approve` and `/deny` queue, timeout handling, and TUI/desktop/channel

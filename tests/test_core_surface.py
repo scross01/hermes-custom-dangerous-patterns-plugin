@@ -25,6 +25,7 @@ import os
 from pathlib import Path
 
 import pytest
+from ruamel.yaml import YAML
 
 PLUGIN_DIR = Path(__file__).resolve().parent.parent
 
@@ -48,6 +49,29 @@ _STATIC_HERMES_TOPLEVEL = frozenset(
 
 # Core module-level tables this plugin must never write to.
 _GUARDED_TABLES = frozenset({"DANGEROUS_PATTERNS", "DANGEROUS_PATTERNS_COMPILED"})
+
+# Top-level keys Hermes's manifest parser recognises, mirroring
+# ``_KNOWN_MANIFEST_FIELDS`` in ``hermes_cli/plugins_manifest.py`` (verified
+# 2026-10-02). A key outside this set is silently dropped AND logged at WARNING
+# on every plugin load when ``manifest_version >= 2`` -- so drift here fails
+# safe (a false positive naming the field to add), never silently.
+_KNOWN_MANIFEST_FIELDS = frozenset(
+    {
+        "name", "version", "description", "author", "requires_env", "provides_tools",
+        "provides_hooks", "kind", "hooks", "label", "optional_env", "platforms",
+        "external_dependencies", "pip_dependencies", "provides_browser_providers",
+        "provides_web_providers", "manifest_version", "api_version", "requires_plugins",
+        "python_dependencies", "config_schema", "license", "homepage", "tags",
+        "capabilities", "emits", "listens", "hermes", "depends", "requires_hermes",
+        "python_runtime", "provides_locales",
+    }
+)
+
+# Fields that must never be declared: they look right but no such field exists.
+# ``provides_cli_commands`` shipped from 0.4.0 until 0.5.0 on the belief that the
+# CLI group needed declaring. It does not -- ``ctx.register_cli_command`` registers
+# it at runtime -- so the key was a no-op that warned on every load.
+_NO_SUCH_MANIFEST_FIELD = ("provides_cli_commands",)
 
 _MUTATING_METHODS = frozenset(
     {
@@ -293,6 +317,82 @@ def test_cli_core_imports_are_read_only():
     findings = _scan(source, "cli.py")
     assert [f for f in findings if "table-write" in f] == []
     assert [f for f in findings if "rebind" in f] == []
+
+
+# ---------------------------------------------------------------------------
+# Manifest guard: declare only fields Hermes actually parses
+# ---------------------------------------------------------------------------
+
+
+def _manifest() -> dict:
+    return YAML(typ="safe").load((PLUGIN_DIR / "plugin.yaml").read_text(encoding="utf-8"))
+
+
+def test_manifest_declares_only_fields_hermes_knows():
+    """plugin.yaml may not carry a key Hermes's manifest parser drops.
+
+    An unknown key is not an error -- the plugin still loads -- but at
+    ``manifest_version: 2`` every parse logs ``unknown manifest field(s)
+    ignored: <key>`` at WARNING. That is log noise in the operator's own Hermes
+    log on every startup, for a declaration that does nothing.
+    """
+    data = _manifest()
+    assert data, "plugin.yaml parsed empty; this guard would pass vacuously"
+    unknown = sorted(set(data) - _KNOWN_MANIFEST_FIELDS)
+    assert unknown == [], (
+        "plugin.yaml declares field(s) absent from Hermes's _KNOWN_MANIFEST_FIELDS "
+        f"({', '.join(unknown)}); each one logs 'unknown manifest field(s) ignored' "
+        "at WARNING on every plugin load. If Hermes gained the field, add it to "
+        "_KNOWN_MANIFEST_FIELDS in this file."
+    )
+
+
+def test_manifest_declares_no_phantom_cli_field():
+    """``provides_cli_commands`` does not exist; declaring it only warns.
+
+    Pinned separately from the check above because it is the one field that was
+    shipped on a false premise and is the natural thing for a maintainer to
+    "restore" when documenting CLI registration.
+    """
+    data = _manifest()
+    for field in _NO_SUCH_MANIFEST_FIELD:
+        assert field not in data, (
+            f"plugin.yaml declares {field}, which Hermes does not parse. The CLI "
+            "group is registered at runtime by ctx.register_cli_command() and needs "
+            "no manifest declaration."
+        )
+
+
+def test_manifest_provides_hooks_matches_the_registered_hook():
+    """``provides_hooks`` is load-bearing and must not drift from ``register()``.
+
+    Unlike the phantom CLI field, this one Hermes does read. A mismatch means the
+    manifest advertises a capability the plugin does not register, or vice versa.
+    """
+    data = _manifest()
+    declared = list(data.get("provides_hooks") or [])
+    source = (PLUGIN_DIR / "__init__.py").read_text(encoding="utf-8")
+    registered = _registered_hooks(source)
+    assert declared == registered, (
+        f"plugin.yaml provides_hooks {declared} != hooks registered in __init__.py "
+        f"{registered}"
+    )
+
+
+def _registered_hooks(source: str) -> list[str]:
+    """Hook names passed to ``register_hook("...")``, sorted and de-duplicated."""
+    names: set[str] = set()
+    for node in ast.walk(ast.parse(source)):
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "register_hook"
+            and node.args
+            and isinstance(node.args[0], ast.Constant)
+            and isinstance(node.args[0].value, str)
+        ):
+            names.add(node.args[0].value)
+    return sorted(names)
 
 
 # ---------------------------------------------------------------------------
