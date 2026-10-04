@@ -379,6 +379,37 @@ def test_manifest_provides_hooks_matches_the_registered_hook():
     )
 
 
+def test_manifest_declares_the_enforced_hermes_floor():
+    """``plugin.yaml`` must declare the Hermes version the plugin actually needs.
+
+    Block patterns escalate with ``{"action": "approve"}``, which
+    ``hermes_cli/plugins.py`` only recognizes from 0.18.1; an older core's
+    ``if action not in ("block", "approve"): continue`` skips the directive and
+    the command runs ungated -- fail-open, which is the opposite of this plugin's
+    posture. ``tools.approval_detection`` (imported by ``patterns.py``) first
+    ships in 0.21.4, below which matching degrades to the plugin's own weaker
+    normalizer. Hermes enforces ``requires_hermes`` by skipping the plugin
+    before import, so declaring the floor is what turns that silent fail-open
+    into a visible refusal.
+
+    Pinned by value rather than by upstream history: the exact releases are not
+    verifiable from this repo, and the floor is the contract that matters.
+    """
+    data = _manifest()
+    assert data, "plugin.yaml parsed empty; this guard would pass vacuously"
+    assert "requires_hermes" in data, (
+        "plugin.yaml declares no requires_hermes; block patterns would silently "
+        "stop gating on a core older than 0.18.1"
+    )
+    assert "requires_hermes" in _KNOWN_MANIFEST_FIELDS, (
+        "the local _KNOWN_MANIFEST_FIELDS mirror has drifted from Hermes; "
+        "requires_hermes must be listed or the unknown-field guard is wrong"
+    )
+    assert "0.21.4" in data["requires_hermes"], (
+        f"floor is {data['requires_hermes']!r}, expected >=0.21.4"
+    )
+
+
 def _registered_hooks(source: str) -> list[str]:
     """Hook names passed to ``register_hook("...")``, sorted and de-duplicated."""
     names: set[str] = set()

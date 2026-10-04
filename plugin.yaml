@@ -1,5 +1,11 @@
 name: custom-dangerous-patterns
 version: "0.5.0"
+# The pre_tool_call "approve" action (which block patterns rely on) only exists
+# from Hermes 0.18.1; older cores ignore an unknown action and the command runs
+# ungated. tools.approval_detection (imported at patterns.py) first ships in
+# 0.21.4, below which matching degrades to the plugin's own normalizer. Hermes
+# enforces this by skipping the plugin before import, with a warning.
+requires_hermes: ">=0.21.4"
 manifest_version: 2
 description: >-
   Add custom dangerous command patterns to Hermes's built-in approval

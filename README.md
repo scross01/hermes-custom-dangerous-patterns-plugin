@@ -788,7 +788,7 @@ See [Directory Config Loading](#directory-config-loading) for details.
 ## Requirements
 
 - Python 3.11+
-- [Hermes Agent](https://github.com/NousResearch/hermes-agent) (tested with 0.15.1)
+- [Hermes Agent](https://github.com/NousResearch/hermes-agent) **>=0.21.4** — enforced by `requires_hermes` in `plugin.yaml`. Older cores are skipped at load: below 0.18.1 the `pre_tool_call` `approve` action does not exist, so block patterns would stop gating anything, and below 0.21.4 `tools.approval_detection` is missing so rules match raw text only.
 - ruamel.yaml — for config loading and write-back (declared in `plugin.yaml`; Hermes installs it automatically)
 
 ### Development

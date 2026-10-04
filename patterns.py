@@ -376,12 +376,38 @@ def _normalized_variants(command: str) -> list[str]:
             if variant and variant not in variants:
                 variants.append(variant)
     except Exception:
-        # Private helper moved/renamed, or the CLI is running outside Hermes.
-        # The local normalization below is still correct, just less thorough.
-        logger.debug(
-            "custom-dangerous-patterns: Hermes detection variants unavailable",
-            exc_info=True,
+        # Two different reasons land here and they deserve different levels.
+        #
+        # Inside Hermes but unable to import tools.approval_detection means the
+        # core is older than 0.21.4: _command_detection_variants is the thing
+        # that collapses evasion spellings (rm\\-rf, rm${IFS}-rf, line
+        # continuations), so block and deny rules are silently matching raw
+        # text only. plugin.yaml's requires_hermes should prevent that; warn
+        # anyway so a mismatch is visible rather than silent.
+        #
+        # Outside Hermes (or a renamed private helper) is routine and expected:
+        # the CLI is a standalone tool and every `test` invocation reaches here.
+        # Keep that at DEBUG so ordinary use does not emit warnings.
+        in_hermes = False
+        try:
+            import tools  # noqa: F401
+
+            in_hermes = True
+        except ImportError:
+            in_hermes = False
+
+        message = (
+            "custom-dangerous-patterns: Hermes command-normalization helper "
+            "unavailable; rules are matching raw text only. This weakens every "
+            "block and deny pattern (Hermes >=0.21.4 is required)."
         )
+        if in_hermes:
+            logger.warning(message, exc_info=True)
+        else:
+            logger.debug(
+                "custom-dangerous-patterns: Hermes detection variants unavailable",
+                exc_info=True,
+            )
 
     local = _normalize(command)
     if local and local not in variants:
