@@ -1,4 +1,9 @@
 # Uses deny_patterns with regex patterns for high-precision command matching.
+# Each subcommand is denied broadly on purpose. A narrower follow-up rule
+# (force-push, reset --hard, clean -fdx) can never be the rule that fires:
+# deny patterns are evaluated in config load order and the first match wins, so
+# these generic rules shadow anything narrower added in a later-sorted file.
+# Narrow a rule here by editing it, never by adding a companion file.
 # This format is needed because glob-based matching cannot express the
 # complex negative lookahead and option-parsing required to prevent
 # arguments like `-c key=value` or `-C /path` from bypassing subcommand rules.
