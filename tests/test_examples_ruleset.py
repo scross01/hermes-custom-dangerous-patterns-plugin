@@ -294,3 +294,101 @@ def test_no_block_rule_uses_a_glob_with_a_trailing_literal_flag():
         if any(not t.strip("*") for t in tokens[:-1]):
             offenders.append(f"{filename} :: {entry.get('description')!r} :: {glob_str!r}")
     assert not offenders, "globs ending in a flag after '**':\n  " + "\n  ".join(offenders)
+
+
+# ---------------------------------------------------------------------------
+# Plan 040 -- bypass rules that could not match their evasion forms
+# ---------------------------------------------------------------------------
+
+# ``(description, command, should_match)``. The first four rows were silently
+# unmatched before the heredoc pattern learned to cross a newline; the next four
+# cover the alias rule, whose old ``\b`` after ``git`` fails before ``=``. The
+# last two are unchanged rules, pinned so a future edit cannot quietly break
+# them.
+#
+# These assert that the NAMED rule matches -- not that it wins. Where
+# 05-git-write.yaml loads first and steals the first-match evaluation, the
+# shadow is documented in the file itself (see the NOTE comments) and pinned by
+# SHADOW_PROBES above.
+BYPASS_MATCH_CASES = [
+    (
+        "[BYPASS] Deny heredoc containing git write subcommand",
+        "cat <<EOF\ngit commit -m x\nEOF",
+        True,
+    ),
+    ("[BYPASS] Deny heredoc containing git write subcommand", "tee <<EOF\ngit push\nEOF", True),
+    (
+        "[BYPASS] Deny heredoc containing git write subcommand",
+        "bash <<EOF git commit EOF",
+        True,
+    ),
+    (
+        "[BYPASS] Deny heredoc containing git write subcommand",
+        "cat <<EOF\nhello world\nEOF",
+        False,
+    ),
+    ("[BYPASS] Deny alias/path override before git invocation", "alias git=/tmp/evil", True),
+    ("[BYPASS] Deny alias/path override before git invocation", "alias git = /tmp/evil", True),
+    ("[BYPASS] Deny alias/path override before git invocation", "alias mygit=/tmp/evil", False),
+    ("[BYPASS] Deny alias/path override before git invocation", "alias github=x", False),
+    (
+        "[BYPASS] Deny alias/path override before git invocation",
+        "cp -f notes.txt backup.txt",
+        False,
+    ),
+    ("[BYPASS] Deny eval wrapping git write subcommand", "eval 'git commit -m x'", True),
+    # Cyrillic U+0455 (ѕ), the homoglyph shipped in the lookalike rule.
+    ("[BYPASS] Deny lookalike git (cyrillic/homoglyph)", "gѕt commit -m x", True),
+]
+
+
+def _deny_rules_by_description():
+    """First loaded deny rule for each description, in load order."""
+    by_description = {}
+    for filename, _index, description, regex in load_deny_rules():
+        by_description.setdefault(description, (filename, regex))
+    return by_description
+
+
+def test_bypass_rule_matches_its_named_evasion_form():
+    """Each bypass rule matches the evasion it is named for -- and nothing benign.
+
+    The heredoc rule used ``[^\n]*``, which by construction cannot cross the
+    newline a heredoc payload always sits behind, so ``cat <<EOF`` +
+    ``git commit`` was gated by neither this rule nor any Hermes built-in. The
+    alias rule required a word boundary after ``git``, which fails before ``=``.
+    """
+    by_description = _deny_rules_by_description()
+    failures = []
+    for description, command, should_match in BYPASS_MATCH_CASES:
+        found = by_description.get(description)
+        if found is None:
+            failures.append(f"no deny rule with description {description!r}")
+            continue
+        _filename, regex = found
+        matched = bool(regex.search(command))
+        if matched is not should_match:
+            verb = "should have matched" if should_match else "should NOT have matched"
+            failures.append(f"{description!r}: {verb} {command!r}")
+    assert not failures, "bypass-rule mismatches:\n  " + "\n  ".join(failures)
+
+
+def test_bypass_rules_compile_under_dotall():
+    """Every enabled deny source compiles under the flags the plugin actually uses.
+
+    ``config.py`` only warns and skips an unbalanced hand-edited regex, so a
+    broken rule would otherwise ship as silently missing coverage.
+    """
+    failures = []
+    for filename, doc in _example_documents():
+        for index, entry in enumerate(doc.get("deny_patterns") or []):
+            if not isinstance(entry, dict) or not entry.get("enabled", True):
+                continue
+            source = _regex_source(entry)
+            if not source:
+                continue
+            try:
+                re.compile(source, re.IGNORECASE | re.DOTALL)
+            except re.error as exc:
+                failures.append(f"{filename}[{index}]: {exc}")
+    assert not failures, "deny sources that do not compile:\n  " + "\n  ".join(failures)

@@ -20,11 +20,21 @@ deny_patterns:
   
   # --- HEREDOC / COMMAND SUBSTITUTION ---
   # `bash <<EOF ... git commit ... EOF` and `$()` substitution
+  # `[\s\S]` (not `[^\n]*`): a heredoc payload is always on the line
+  # AFTER the `<<`, so a same-line-only pattern can never match a real
+  # heredoc. That gap was ungated by any Hermes built-in for non-shell
+  # readers such as cat/tee. The segments are lazy (`*?`) so a command
+  # containing a bare `<<` and no git write cannot match.
   - description: '[BYPASS] Deny heredoc containing git write subcommand'
     enabled: true
     group: BYPASS
-    pattern: '<<[^\n]*\b(?:git|gh)\b[^\n]*\b(?:commit|push|merge|rebase|reset|clean|restore|checkout|switch|update-index|update-ref|filter-branch|filter-repo|cherry-pick|revert|stash|add|rm|mv|am|apply|fast-import|symbolic-ref|receive-pack)\b'
+    pattern: '<<[\s\S]*?\b(?:git|gh)\b[\s\S]*?\b(?:commit|push|merge|rebase|reset|clean|restore|checkout|switch|update-index|update-ref|filter-branch|filter-repo|cherry-pick|revert|stash|add|rm|mv|am|apply|fast-import|symbolic-ref|receive-pack)\b'
   
+  # NOTE: when 05-git-write.yaml is also loaded, its generic
+  # `git <subcommand>` rules match this first (deny rules are
+  # first-match-wins in load order), so this rule will not be the one
+  # that fires. It is retained as coverage for setups that load this
+  # file alone.
   - description: '[BYPASS] Deny $(...) command substitution with git writes'
     enabled: true
     group: BYPASS
@@ -32,13 +42,24 @@ deny_patterns:
   
   # --- PATH / ALIAS WRAPPERS ---
   # Redefining `git` to a script before invoking
+  # Anchored on the DEFINITION, not on a later invocation: the old form
+  # needed a second `git` token plus a word boundary after `alias\s+git`,
+  # so the common `alias git=/tmp/evil` never matched (`=` is not a word
+  # character). `(?![\w-])` keeps `alias mygit=` and `alias github=` out.
+  # `ln -s` and `cp -f` still require a later `git` token so ordinary file
+  # copies are not denied; `export PATH=` is self-identifying.
   - description: '[BYPASS] Deny alias/path override before git invocation'
     enabled: true
     group: BYPASS
-    pattern: '\b(?:alias\s+git|export\s+PATH|ln\s+-s\w*|cp\s+-f)\b[^\n]*\bgit\b'
+    pattern: '\b(?:alias\s+git(?![\w-])|export\s+PATH\b|ln\s+-s\w*[^\n]*\bgit\b|cp\s+-f[^\n]*\bgit\b)'
   
   # --- ENV-VAR TRICKS ---
   # `GIT_SSH_COMMAND='rm -rf ~' git push` style
+  # NOTE: when 05-git-write.yaml is also loaded, its generic
+  # `git <subcommand>` rules match this first (deny rules are
+  # first-match-wins in load order), so this rule will not be the one
+  # that fires. It is retained as coverage for setups that load this
+  # file alone.
   - description: '[BYPASS] Deny GIT_* env vars with destructive commands'
     enabled: true
     group: BYPASS
