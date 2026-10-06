@@ -68,6 +68,33 @@ def load_deny_rules():
     return rules
 
 
+def load_block_rules():
+    """``[(filename, description, regex_source)]`` for enabled block patterns.
+
+    ``glob:`` entries are resolved through ``patterns.glob_to_regex``, so the
+    source is what the plugin actually compiles at startup.
+    """
+    rules = []
+    for filename, doc in _example_documents():
+        for entry in doc.get("patterns") or []:
+            if not isinstance(entry, dict) or not entry.get("enabled", True):
+                continue
+            source = _regex_source(entry)
+            if source:
+                rules.append((filename, entry.get("description", ""), source))
+    return rules
+
+
+def load_block_entries():
+    """``[(filename, raw_entry)]`` for enabled block patterns, key and all."""
+    entries = []
+    for filename, doc in _example_documents():
+        for entry in doc.get("patterns") or []:
+            if isinstance(entry, dict) and entry.get("enabled", True):
+                entries.append((filename, entry))
+    return entries
+
+
 def _first_deny_match(command):
     """The ``(filename, description)`` of the deny rule that fires first."""
     for filename, _index, description, regex in load_deny_rules():
@@ -145,3 +172,125 @@ def test_every_enabled_deny_rule_has_a_description():
         if not description or not _TAGGED_DESCRIPTION.match(description):
             empty.append(f"{filename}[{index}]: {description!r}")
     assert not empty, "deny rules missing a bracketed description tag:\n  " + "\n  ".join(empty)
+
+
+# ---------------------------------------------------------------------------
+# Plan 039 -- glob rules that could not match their own target command
+# ---------------------------------------------------------------------------
+
+# ``(filename, description, command, should_match)``. Every ``True`` row was
+# silently unmatched before the conversion to ``pattern:``; every ``False`` row
+# exists so an over-broad replacement that prompts on every ``docker run``
+# cannot pass.
+BLOCK_MATCH_CASES = [
+    ("02-infra.yaml", "docker run with privileged flag", "docker run --privileged ubuntu", True),
+    (
+        "02-infra.yaml",
+        "docker run with privileged flag",
+        "docker run -it --privileged ubuntu sh",
+        True,
+    ),
+    (
+        "02-infra.yaml",
+        "docker run with privileged flag",
+        "docker run --privileged=true ubuntu",
+        True,
+    ),
+    (
+        "02-infra.yaml",
+        "docker run with privileged flag",
+        "docker run --rm -v /:/host alpine",
+        False,
+    ),
+    ("02-infra.yaml", "docker run mounting root filesystem", "docker run -v /:/host alpine", True),
+    (
+        "02-infra.yaml",
+        "docker run mounting root filesystem",
+        "docker run --rm -v /:/host alpine",
+        True,
+    ),
+    ("02-infra.yaml", "docker run mounting /etc", "docker run -v /etc:/etc alpine", True),
+    ("02-infra.yaml", "docker run mounting /etc", "docker run -v /var:/v alpine", False),
+    ("02-infra.yaml", "podman run with privileged flag", "podman run --privileged alpine", True),
+    ("02-infra.yaml", "podman run with privileged flag", "podman run alpine", False),
+    ("03-tools.yaml", "rsync with --delete (mirror-delete)", "rsync --delete src/ dst/", True),
+    ("03-tools.yaml", "rsync with --delete (mirror-delete)", "rsync -a --delete src/ dst/", True),
+    ("03-tools.yaml", "rsync with --delete (mirror-delete)", "rsync -a src/ dst/", False),
+    ("03-tools.yaml", "clamscan with --move (quarantine)", "clamscan --move=./q /tmp/x", True),
+    ("03-tools.yaml", "clamscan with --move (quarantine)", "clamscan -r --move=./q /tmp/x", True),
+    ("03-tools.yaml", "clamscan with --move (quarantine)", "clamscan /tmp/x", False),
+]
+
+# The six rules that were converted from ``glob:`` to ``pattern:``.
+FIXED_GLOB_RULES = {(f, d) for f, d, _c, _e in BLOCK_MATCH_CASES}
+
+
+def test_block_rule_matches_its_named_target_command():
+    r"""Each converted rule matches the commands it is named for -- and only those.
+
+    ``**`` compiles to ``.*\s+``, so a glob needs a token on BOTH sides of it.
+    ``docker run ** --privileged`` therefore never matched
+    ``docker run --privileged ubuntu``, which is the common spelling of the very
+    command the rule exists to catch, and no Hermes built-in covers it either.
+    """
+    rules = {(f, d): src for f, d, src in load_block_rules()}
+    failures = []
+    for filename, description, command, should_match in BLOCK_MATCH_CASES:
+        source = rules.get((filename, description))
+        if source is None:
+            failures.append(f"{filename} :: {description!r} not found")
+            continue
+        matched = bool(re.search(source, command, _RE_FLAGS))
+        if matched is not should_match:
+            verb = "should have matched" if should_match else "should NOT have matched"
+            failures.append(
+                f"{filename} :: {description!r}: {verb} {command!r} (source {source!r})"
+            )
+    assert not failures, "block-rule target mismatches:\n  " + "\n  ".join(failures)
+
+
+def test_six_fixed_rules_are_patterns_not_globs():
+    """The repaired rules must be hand-written ``pattern:`` entries.
+
+    A future edit that turns one back into a ``glob:`` silently reintroduces
+    the false negative, because the glob translator is not being changed.
+    """
+    entries = {(f, e.get("description")): e for f, e in load_block_entries()}
+    wrong = []
+    for key in sorted(FIXED_GLOB_RULES):
+        entry = entries.get(key)
+        if entry is None:
+            wrong.append(f"{key} not found")
+        elif "pattern" not in entry or "glob" in entry:
+            wrong.append(f"{key} uses keys {sorted(entry)} instead of pattern:")
+    assert not wrong, "repaired rules reverted to glob form:\n  " + "\n  ".join(wrong)
+
+
+def test_no_block_rule_uses_a_glob_with_a_trailing_literal_flag():
+    """No ``glob:`` may END in a flag literal that some earlier ``**`` precedes.
+
+    That is the shape that produced the false negatives this plan fixes:
+    ``**`` requires a token on both sides, so a flag written as the final glob
+    token can never be the first argument after the tool name --
+    ``docker run ** --privileged`` could not match
+    ``docker run --privileged ubuntu``.
+
+    Only the FINAL token is examined, deliberately. A mid-glob flag such as
+    ``ansible ** -m shell **`` is correct: ansible requires a host pattern
+    before ``-m``, and that rule's trailing ``**`` is what carries it. The
+    mid-glob shape is still guarded, but semantically -- by
+    ``test_block_rule_matches_its_named_target_command``, which fails if any of
+    the six repaired rules is reverted to a glob.
+    """
+    offenders = []
+    for filename, entry in load_block_entries():
+        glob_str = entry.get("glob")
+        if not isinstance(glob_str, str) or not glob_str.split():
+            continue
+        tokens = glob_str.split()
+        final = tokens[-1]
+        if not (final.startswith("-") or "=" in final):
+            continue
+        if any(not t.strip("*") for t in tokens[:-1]):
+            offenders.append(f"{filename} :: {entry.get('description')!r} :: {glob_str!r}")
+    assert not offenders, "globs ending in a flag after '**':\n  " + "\n  ".join(offenders)

@@ -5,9 +5,12 @@ patterns:
     glob: restic {forget,prune,rewrite,repair} **
 
   # --- File Sync (destructive flags) ---
+  # Regex rather than glob for the same reason as the docker rules in
+  # 02-infra.yaml: `rsync ** --delete**` could not match `rsync --delete src/
+  # dst/`, because `**` demands a token between the tool and the flag.
   - description: rsync with --delete (mirror-delete)
     group: tools
-    glob: rsync ** --delete**
+    pattern: '\brsync(?!/)(?:\s+\S+)*\s+--delete\b'
 
   - description: rclone delete/purge/move (cloud data destruction)
     group: tools
@@ -42,6 +45,7 @@ patterns:
     glob: trufflehog git **
 
   # --- Antivirus (quarantine capable) ---
+  # Regex rather than glob: `clamscan --move=./q` has no token before the flag.
   - description: clamscan with --move (quarantine)
     group: tools
-    glob: clamscan ** --move=**
+    pattern: '\bclamscan(?!/)(?:\s+\S+)*\s+--move=\S+'

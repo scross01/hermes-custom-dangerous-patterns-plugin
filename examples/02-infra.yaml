@@ -18,25 +18,32 @@ patterns:
     glob: ansible ** -a **
 
   # --- Container Runtimes (beyond built-in docker lifecycle) ---
+  # Written as regexes, not globs: `docker run ** --privileged**` compiles to
+  # `\s+.*\s+--privileged.*`, which cannot match `docker run --privileged
+  # ubuntu` -- the most common spelling of the command it exists to catch --
+  # because `**` requires a token on both sides. Anything that can be the
+  # FIRST argument must be a `pattern:`, never a glob.
   - description: docker run with privileged flag
     group: infra
-    glob: docker run ** --privileged**
+    pattern: '\bdocker(?!/)\s+run(?:\s+\S+)*\s+--privileged\b'
 
   - description: docker run mounting root filesystem
     group: infra
-    glob: docker run ** -v /:**
+    pattern: '\bdocker(?!/)\s+run(?:\s+\S+)*\s+-v\s+/:'
 
   - description: docker run mounting /etc
     group: infra
-    glob: docker run ** -v /etc:**
+    pattern: '\bdocker(?!/)\s+run(?:\s+\S+)*\s+-v\s+/etc:'
 
   - description: podman destructive subcommands
     group: infra
     glob: podman {rm,rmi,stop,kill} **
 
+  # Same `**` trap as the docker rules above: `podman run ** --privileged**`
+  # never matches `podman run --privileged alpine`.
   - description: podman run with privileged flag
     group: infra
-    glob: podman run ** --privileged**
+    pattern: '\bpodman(?!/)\s+run(?:\s+\S+)*\s+--privileged\b'
 
   # --- VM Lifecycle ---
   - description: colima stop/delete
