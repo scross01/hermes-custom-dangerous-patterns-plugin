@@ -12,31 +12,36 @@
 # Plan 020 / CHANGELOG 0.4.x deliberately stopped shipping a full bundled
 # snapshot of Hermes's table, so vendoring all 107 entries here would undo
 # that. Instead this is a MINIMAL, SCAN-SAFE subset chosen for what it
-# exercises, not for completeness:
+# exercises, not for completeness.
 #
-#   * the two built-ins that produce the three genuine overlaps
-#     ("stop/delete service (sc)" and the docker-compose lifecycle rule),
-#     which stand in for the real table's genuine hits; and
-#   * four built-ins that were among the ORIGINAL false-positive sources --
-#     under the old "any shared token" rule the FULL table fired on 29 of 48
-#     shipped example patterns (npm/pnpm/yarn/pip/brew uninstall pairing with
-#     "stop/restart hermes launchd service" over the token `remove`; the
-#     gateway/launchd rules pairing with brew over `run`/`restart`).
+# WHAT CHANGED, 2026-10-04 (plan 041)
+# ------------------------------------
+# The two entries formerly labelled "genuine overlap sources" -- "stop/delete
+# service (sc)" and the docker-compose lifecycle rule -- were REMOVED, because
+# they were false positives: measured against the real table, `colima stop`,
+# `colima delete`, `limactl delete` and every `podman` probe never defer to
+# them. They paired only over shared bigrams like `stop` and `delete`, so they
+# trained the suite to accept warnings that teach users to ignore the message.
 #
-# Only the CURRENT figure transfers exactly. Measured over
-# `examples/*.yaml`, the full table gives 29 under the old rule and 3 under
-# the bigram rule; THIS subset gives 13 and 3. So the subset is built around
-# the shipped behaviour -- the number that actually reaches a user -- and is
-# deliberately not a scale model of the old rule's noise.
+# They could not simply be replaced by the real `package manager uninstall`
+# built-ins either. Those share ZERO adjacent token pairs with any shipped
+# example rule, because brace expansion fragments `uninstall` into
+# `':uninstall'` -- so adding them would drive the measured count to 0 and
+# break the lower bound. The genuine-overlap entries are therefore SYNTHETIC:
+# a near-duplicate pair that spells the same command twice, which is the shape
+# of a real deferral without depending on which shipped rule happens to
+# collide with which upstream built-in today.
 #
-# The 3 is pinned as a two-sided bound (at most 3, at least 2) rather than an
-# exact value, so a future Hermes table that legitimately adds a bigram-sharing
-# built-in relaxes the bound instead of failing an unrelated PR. The 13 still
-# sits far above that bound, which is what keeps the corpus discriminating:
-# test_overlap_corpus_would_catch_a_regression_to_any_shared_token asserts
-# exactly that. If you change the corpus, re-measure against the real table
-# and update tests/test_overlap.py and the figures quoted in
-# patterns.py::_regexes_suspect_overlap.
+# This corpus is NOT a scale model of upstream noise. It is built around the
+# shipped behaviour -- the number that actually reaches a user -- and is pinned
+# as a two-sided bound (at most 3 warnings over the shipped examples, at least
+# 2 before plan 041) so a future Hermes table that legitimately adds a
+# bigram-sharing built-in relaxes the bound instead of failing an unrelated
+# PR's test run.
+#
+# >>> If you change this corpus, re-measure against the real table and update
+#     tests/test_overlap.py and the figures quoted in
+#     patterns.py::_regexes_suspect_overlap. That instruction is load-bearing.
 #
 # Provenance: copied verbatim from Hermes origin/main
 # tools/approval_detection.py. Descriptions are kept because the startup
@@ -45,13 +50,21 @@
 # Block style, not flow sequences: a regex alternation like (?:stop|delete)
 # contains ", " which YAML reads as a flow-sequence item separator.
 #
-#   entries: 6      (real table: 107)
+#   entries: 6      (2 synthetic genuine + 4 original false-positive sources)
 
 # --- genuine overlap sources -------------------------------------------
-- pattern: '\bsc(?:\.exe)?\s+(?:stop|delete)\b'
-  description: 'stop/delete service (sc)'
-- pattern: '\bdocker(?:-compose|\s+compose)\s+(?:-\S++(?:\s(?!-\S)\S++)?\s++)*(restart|stop|kill|down)\b'
-  description: 'docker compose restart/stop/kill/down (container lifecycle)'
+# Synthetic, deliberately. A corpus of only the real built-ins that shipped
+# example rules touch cannot work: the bigram heuristic matches nothing against
+# them (the package-manager uninstall rules share no adjacent token pair with
+# any shipped rule, because brace expansion fragments `uninstall` into
+# `':uninstall'`). These two are the genuine-overlap case the matcher must
+# still detect. They mirror the shape of a real deferral -- a custom rule and a
+# built-in spelling the same command differently -- without depending on which
+# shipped rule happens to collide today.
+- pattern: '\bkubectl\s+(?:delete|destroy)\b'
+  description: 'delete kubernetes resources (kubectl)'
+- pattern: '\bkubectl\s+(?:delete|destroy)\b(?![\w-])'
+  description: 'delete kubernetes resources (kubectl, boundary variant)'
 
 # --- original false-positive sources ----------------------------------
 - pattern: '\A(?=[\s\S]*\blaunchctl\s+(?:stop|kickstart|bootout|unload|kill|disable|remove)\b)(?=[\s\S]*\b(?:hermes|ai\.hermes)\b)'

@@ -365,27 +365,34 @@ def test_shipped_examples_produce_few_overlap_warnings(init_register, fake_detec
     """Regression guard against the startup warning becoming noise again.
 
     Measured against the real built-in table, the shipped example configs
-    emitted 29 warnings before bigrams were required; the measured figure is
-    now 3 of 48. Both ends are pinned deliberately:
+    emitted 29 warnings before bigrams were required; the bigram rule brought
+    that to 3 of 48 -- and all 3 were then shown to be false positives (plan
+    041): `colima`/`limactl`/`podman` never defer to Hermes's `sc stop|delete`
+    or docker-compose rules, they only shared bigrams with them.
 
-    * the upper bound stops the warning from drifting back toward noise, and
-    * the lower bound stops the matcher from silently degenerating into
-      "never fires" -- which would satisfy an upper bound alone.
+    With the offending examples corrected, the honest figure is now **0**, and
+    0 is what is asserted. The upper half of the old two-sided bound therefore
+    collapses to an exact value: any warning over a shipped example is a bug in
+    the example, not acceptable noise.
 
-    The corpus is fixtures/builtin_overlap_corpus.yaml, a verbatim subset of
-    Hermes's table (6 of 107 entries) that yields the same 3 while keeping the
-    previously-noisy false-positive sources in play. It is NOT the one-entry
-    ``fake_detector`` stub: measuring noise needs a table with enough entries
-    for noise to be possible, and against that stub `warned` is always 0,
-    which would make any upper bound vacuously true.
+    That would be a WEAKER guard on its own -- a matcher stubbed to
+    ``return False`` also yields 0 -- so the lower half of the bound moved out
+    of this count and into ``test_overlap_matcher_still_detects_a_genuine_overlap``
+    below, which asserts the matcher fires against the corpus's synthetic
+    genuine-overlap pair directly. Companion test
+    ``test_overlap_corpus_would_catch_a_regression_to_any_shared_token`` keeps
+    the corpus's noise headroom pinned so it cannot be quietly blunted.
 
-    Only the 3 transfers; the 29 does not. The old rule yields 13 against this
-    subset -- see the companion test below, which asserts that headroom
-    survives so the corpus cannot be quietly blunted.
+    The corpus is fixtures/builtin_overlap_corpus.yaml, a stand-in for Hermes's
+    table (6 of 107 entries: 2 synthetic genuine-overlap + 4 original
+    false-positive sources). It is NOT the one-entry ``fake_detector`` stub:
+    measuring noise needs a table with enough entries for noise to be possible.
 
-    An exact ``== 3`` is deliberately NOT asserted: the corpus stands in for
-    a table Hermes grows upstream. A new built-in sharing a bigram should
-    relax this bound, not break an unrelated PR's test run.
+    Note the exact ``== 0`` is deliberately strict, and that strictness is the
+    trade: a future Hermes built-in sharing a bigram with a shipped example
+    rule will fail this test. That is the intended signal -- the example should
+    then be split or reworded, the way plan 041 split the package-manager and
+    container rules.
     """
     import yaml
 
@@ -408,8 +415,35 @@ def test_shipped_examples_produce_few_overlap_warnings(init_register, fake_detec
                 warned += 1
 
     assert total > 40, "expected the shipped examples to still load"
-    assert warned <= 3, f"overlap warning noise regressed: {warned}/{total} patterns"
-    assert warned >= 2, f"overlap matcher stopped detecting real overlaps: {warned}/{total}"
+    assert warned == 0, f"overlap warning noise regressed: {warned}/{total} patterns"
+
+
+def test_overlap_matcher_still_detects_a_genuine_overlap(init_register, fake_detector):
+    """The bigram matcher must still fire; a 0-warning corpus must not mean
+    a dead matcher. Pinned directly against the corpus's genuine pair rather
+    than inferred from the shipped-example count.
+
+    This is the lower half of the bound that
+    ``test_shipped_examples_produce_few_overlap_warnings`` gave up when the
+    correct answer became exactly 0: without it, stubbing
+    ``_regexes_suspect_overlap`` to ``return False`` would satisfy the count.
+    """
+    import yaml
+
+    p = init_register.patterns
+    corpus = [
+        e["pattern"]
+        for e in yaml.safe_load(
+            (Path(__file__).parent / "fixtures" / "builtin_overlap_corpus.yaml").read_text(
+                encoding="utf-8"
+            )
+        )
+    ]
+    a, b = corpus[0], corpus[1]
+    assert p._regexes_suspect_overlap(a, b), (
+        "the bigram overlap matcher stopped firing on the corpus's own "
+        "genuine-overlap pair"
+    )
 
 
 def test_overlap_corpus_would_catch_a_regression_to_any_shared_token(

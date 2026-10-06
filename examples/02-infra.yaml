@@ -35,9 +35,26 @@ patterns:
     group: infra
     pattern: '\bdocker(?!/)\s+run(?:\s+\S+)*\s+-v\s+/etc:'
 
-  - description: podman destructive subcommands
+  # One rule per subcommand, deliberately: the combined
+  # `podman {rm,rmi,stop,kill} **` form shared the bigram `stop delete` with
+  # Hermes's docker-compose lifecycle rule and so drew a BUILT-IN OVERLAP
+  # warning at startup, even though no podman command ever defers to a built-in.
+  # Split, the warning is correct by absence rather than by disclaimer.
+  - description: podman rm
     group: infra
-    glob: podman {rm,rmi,stop,kill} **
+    glob: podman rm **
+
+  - description: podman rmi
+    group: infra
+    glob: podman rmi **
+
+  - description: podman stop
+    group: infra
+    glob: podman stop **
+
+  - description: podman kill
+    group: infra
+    glob: podman kill **
 
   # Same `**` trap as the docker rules above: `podman run ** --privileged**`
   # never matches `podman run --privileged alpine`.
@@ -46,13 +63,25 @@ patterns:
     pattern: '\bpodman(?!/)\s+run(?:\s+\S+)*\s+--privileged\b'
 
   # --- VM Lifecycle ---
-  - description: colima stop/delete
+  - description: colima stop
     group: infra
-    glob: colima {stop,delete,destroy}
+    glob: colima stop
 
-  - description: limactl stop/delete
+  - description: colima delete
     group: infra
-    glob: limactl {stop,delete}
+    glob: colima delete
+
+  - description: colima destroy
+    group: infra
+    glob: colima destroy
+
+  - description: limactl stop
+    group: infra
+    glob: limactl stop
+
+  - description: limactl delete
+    group: infra
+    glob: limactl delete
 
   # --- TLS/Certificate Management ---
   - description: certbot delete/revoke/unregister

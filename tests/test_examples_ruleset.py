@@ -392,3 +392,61 @@ def test_bypass_rules_compile_under_dotall():
             except re.error as exc:
                 failures.append(f"{filename}[{index}]: {exc}")
     assert not failures, "deny sources that do not compile:\n  " + "\n  ".join(failures)
+
+
+# ---------------------------------------------------------------------------
+# Plan 041 -- brace globs split so install and uninstall behave alike
+# ---------------------------------------------------------------------------
+
+# ``(filename, description, command, should_match)``. The combined
+# ``{install,uninstall}`` forms were half-live and half-silent: Hermes owns the
+# uninstall half, so it deferred at runtime while the startup warning said
+# nothing, because brace expansion fragments the tokens the heuristic compares.
+SPLIT_RULE_CASES = [
+    ("02-infra.yaml", "podman rm", "podman rm web", True),
+    ("02-infra.yaml", "podman rmi", "podman rmi alpine", True),
+    ("02-infra.yaml", "podman stop", "podman stop web", True),
+    ("02-infra.yaml", "podman kill", "podman kill web", True),
+    ("02-infra.yaml", "podman stop", "podman ps", False),
+    ("02-infra.yaml", "colima stop", "colima stop", True),
+    ("02-infra.yaml", "colima delete", "colima delete", True),
+    ("02-infra.yaml", "colima destroy", "colima destroy", True),
+    ("02-infra.yaml", "colima stop", "colima start", False),
+    ("02-infra.yaml", "limactl stop", "limactl stop", True),
+    ("02-infra.yaml", "limactl delete", "limactl delete", True),
+    ("04-package-managers.yaml", "brew install", "brew install wget", True),
+    ("04-package-managers.yaml", "brew remove", "brew remove wget", True),
+    ("04-package-managers.yaml", "brew install", "brew uninstall wget", False),
+    ("04-package-managers.yaml", "npm install -g", "npm install -g typescript", True),
+    ("04-package-managers.yaml", "npm uninstall -g", "npm uninstall -g typescript", True),
+    ("04-package-managers.yaml", "npm install -g", "npm uninstall -g x", False),
+    ("04-package-managers.yaml", "npm -g install", "npm -g install yarn", True),
+    ("04-package-managers.yaml", "npm -g add", "npm -g add yarn", True),
+    ("04-package-managers.yaml", "npm -g uninstall", "npm -g uninstall yarn", True),
+    ("04-package-managers.yaml", "yarn global add", "yarn global add foo", True),
+    ("04-package-managers.yaml", "yarn global remove", "yarn global remove foo", True),
+    ("04-package-managers.yaml", "pip install", "pip install requests", True),
+    ("04-package-managers.yaml", "pip uninstall", "pip uninstall requests", True),
+    ("04-package-managers.yaml", "pip install", "pip uninstall requests", False),
+]
+
+
+def test_split_subcommand_rules_still_cover_every_subcommand():
+    """Every subcommand the combined brace globs covered is still covered.
+
+    Splitting a rule is only safe if coverage is preserved exactly: a command
+    that matched before and matches nothing now is a hole, and a rule that
+    matches too much is a false prompt. Both directions are asserted.
+    """
+    rules = {(f, d): src for f, d, src in load_block_rules()}
+    failures = []
+    for filename, description, command, should_match in SPLIT_RULE_CASES:
+        source = rules.get((filename, description))
+        if source is None:
+            failures.append(f"{filename} :: {description!r} not found")
+            continue
+        matched = bool(re.search(source, command, _RE_FLAGS))
+        if matched is not should_match:
+            verb = "should have matched" if should_match else "should NOT have matched"
+            failures.append(f"{filename} :: {description!r}: {verb} {command!r}")
+    assert not failures, "split-rule coverage regressions:\n  " + "\n  ".join(failures)

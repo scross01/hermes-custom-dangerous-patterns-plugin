@@ -1,26 +1,58 @@
+# Coverage note, 2026-10-04: Hermes already gates package-manager UNINSTALL for
+# npm, pnpm, yarn, pip, and brew. Where this file also covers an uninstall
+# subcommand, the custom rule DEFERS to the built-in gate (one prompt, not two),
+# so the custom description is not what the user sees, and choosing `always`
+# allowlists the built-in key. Hermes has no equivalent rule for gem, cargo,
+# uv tool, or pipx -- those uninstall subcommands here are the ones genuinely
+# adding protection, and they stay live.
 patterns:
   # --- Homebrew ---
-  - description: brew install/uninstall/remove
+  # Install and uninstall are SEPARATE rules on purpose. Hermes already gates
+  # `brew uninstall|remove|rm`, so a combined rule silently defers on its
+  # uninstall half while staying live on install -- an enforcement split no
+  # startup warning disclosed. Split, `brew install` is plainly covered and the
+  # uninstall half is plainly Hermes's.
+  - description: brew install
     group: package-managers
-    glob: brew {install,uninstall,remove} **
+    glob: brew install **
+
+  - description: brew remove
+    group: package-managers
+    glob: brew {remove,rm} **
 
   - description: brew upgrade/cleanup
     group: package-managers
     glob: brew {upgrade,cleanup} **
 
   # --- npm (global) ---
-  - description: npm install/uninstall -g
+  - description: npm install -g
     group: package-managers
-    glob: npm {install,uninstall} -g **
+    glob: npm install -g **
 
-  - description: npm -g install/uninstall
+  - description: npm uninstall -g
     group: package-managers
-    glob: npm -g {install,uninstall,add} **
+    glob: npm uninstall -g **
+
+  - description: npm -g install
+    group: package-managers
+    glob: npm -g install **
+
+  - description: npm -g add
+    group: package-managers
+    glob: npm -g add **
+
+  - description: npm -g uninstall
+    group: package-managers
+    glob: npm -g uninstall **
 
   # --- yarn (global) ---
-  - description: yarn global add/remove
+  - description: yarn global add
     group: package-managers
-    glob: yarn global {add,remove} **
+    glob: yarn global add **
+
+  - description: yarn global remove
+    group: package-managers
+    glob: yarn global remove **
 
   # --- uv tool ---
   - description: uv tool install/uninstall
@@ -43,9 +75,13 @@ patterns:
     glob: go install **
 
   # --- pip (global) ---
-  - description: pip install/uninstall
+  - description: pip install
     group: package-managers
-    glob: pip {install,uninstall} **
+    glob: pip install **
+
+  - description: pip uninstall
+    group: package-managers
+    glob: pip uninstall **
 
   # --- gem (Ruby) ---
   - description: gem install/uninstall

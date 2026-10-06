@@ -95,16 +95,21 @@ def _regexes_suspect_overlap(a: str, b: str) -> bool:
     service" over the token `remove`. Requiring a shared bigram drops that to 3
     and keeps the pairings plausible.
 
-    Both figures are measured against the real table. Of the two, only the second
-    is replayed by the suite: ``tests/test_overlap.py`` runs a verbatim
-    6-entry subset of the table (``tests/fixtures/builtin_overlap_corpus.yaml``)
-    through the bigram rule and gets the same 3, which it pins as a two-sided
-    bound (at most 3, at least 2) so the number here cannot drift away from the
-    shipped behaviour in either direction. The 29 is deliberately NOT
-    reproduced by that subset -- the old rule yields 13 there -- because the
-    subset is built around the shipped behaviour, not around modelling the old
-    rule's noise at scale. 13 still sits far above the pinned bound, which is
-    what keeps the corpus discriminating.
+    Those 3 were then audited (plan 041) and every one of them turned out to be
+    a false positive -- `colima`/`limactl`/`podman` never defer to Hermes's
+    `sc stop|delete` or docker-compose rules -- while five package-manager rules
+    deferred in silence. With the example data corrected, the shipped examples
+    now produce **0** warnings against both the real table and the pinned
+    corpus, and ``tests/test_overlap.py`` asserts exactly that.
+
+    A bare ``== 0`` on its own would be a weaker guard than the two-sided bound
+    it replaced: a matcher stubbed to ``return False`` also yields 0. The lower
+    half of the bound therefore moved out of the count and into a direct
+    assertion against the corpus's synthetic genuine-overlap pair, which fails
+    if this function stops firing regardless of what the examples happen to
+    contain. The corpus's discriminating headroom is pinned separately by
+    replaying the old any-shared-token rule over it (17 of 59 after the splits,
+    far above the bound).
 
     This remains a heuristic. Two spellings of the same rule can share no bigram
     at all, so a real overlap can be missed -- which is why the enforcement-time
