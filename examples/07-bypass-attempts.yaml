@@ -24,11 +24,17 @@ deny_patterns:
   # AFTER the `<<`, so a same-line-only pattern can never match a real
   # heredoc. That gap was ungated by any Hermes built-in for non-shell
   # readers such as cat/tee. The segments are lazy (`*?`) so a command
-  # containing a bare `<<` and no git write cannot match.
+  # containing a bare `<<` and no git write cannot match. The second
+  # segment is bounded with `[^\n]*?`: an unbounded second `[\s\S]*?`
+  # scans the rest of the input for every `git` token, which is
+  # quadratic on pathological input like `"cat <<EOF git x\n" * 400`
+  # (measured ~3 s; bounded form is ~20 ms). The trailing
+  # `git\n<subcommand>` shape is vanishingly rare and no longer gated
+  # here.
   - description: '[BYPASS] Deny heredoc containing git write subcommand'
     enabled: true
     group: BYPASS
-    pattern: '<<[\s\S]*?\b(?:git|gh)\b[\s\S]*?\b(?:commit|push|merge|rebase|reset|clean|restore|checkout|switch|update-index|update-ref|filter-branch|filter-repo|cherry-pick|revert|stash|add|rm|mv|am|apply|fast-import|symbolic-ref|receive-pack)\b'
+    pattern: '<<[\s\S]*?\b(?:git|gh)\b[^\n]*?\b(?:commit|push|merge|rebase|reset|clean|restore|checkout|switch|update-index|update-ref|filter-branch|filter-repo|cherry-pick|revert|stash|add|rm|mv|am|apply|fast-import|symbolic-ref|receive-pack)\b'
   
   # NOTE: when 05-git-write.yaml is also loaded, its generic
   # `git <subcommand>` rules match this first (deny rules are

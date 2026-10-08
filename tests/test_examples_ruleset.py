@@ -7,6 +7,7 @@ see AGENTS.md "Testing Safety".
 from __future__ import annotations
 
 import re
+import time
 from pathlib import Path
 
 import yaml
@@ -371,6 +372,27 @@ def test_bypass_rule_matches_its_named_evasion_form():
             verb = "should have matched" if should_match else "should NOT have matched"
             failures.append(f"{description!r}: {verb} {command!r}")
     assert not failures, "bypass-rule mismatches:\n  " + "\n  ".join(failures)
+
+
+def test_heredoc_rule_timing_on_pathological_input():
+    """The heredoc deny rule must not blow up quadratically on a `<<`/`git`
+    spam input with no subcommand.
+
+    The second segment used to be an unbounded ``[\\s\\S]*?``, so every
+    ``git`` token triggered a scan to EOF; ``"cat <<EOF git x\\n" * 400``
+    (6.4 KB) took ~3 s. Bounding it with ``[^\\n]*?`` brings this under
+    ~20 ms. The budget is generous to stay stable on slow CI.
+    """
+    by_description = _deny_rules_by_description()
+    found = by_description.get("[BYPASS] Deny heredoc containing git write subcommand")
+    assert found is not None
+    _filename, regex = found
+    pathological = "cat <<EOF git x\n" * 400
+    start = time.perf_counter()
+    matched = regex.search(pathological)
+    elapsed = time.perf_counter() - start
+    assert matched is None
+    assert elapsed < 1.0, f"heredoc rule took {elapsed:.2f}s on pathological input"
 
 
 def test_bypass_rules_compile_under_dotall():
