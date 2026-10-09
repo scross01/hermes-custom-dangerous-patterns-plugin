@@ -302,8 +302,11 @@ def test_no_block_rule_uses_a_glob_with_a_trailing_literal_flag():
 # ---------------------------------------------------------------------------
 
 # ``(description, command, should_match)``. The first four rows were silently
-# unmatched before the heredoc pattern learned to cross a newline; the next four
-# cover the alias rule, whose old ``\b`` after ``git`` fails before ``=``. The
+# unmatched before the heredoc pattern learned to cross a newline; the next
+# four pin the heredoc shape after the ReDoS re-anchor (quoted delimiter, the
+# ``gh`` form, a git path inside the 256-char window, and a git write sitting
+# BEFORE the heredoc, which must stay unclaimed here); then four rows cover
+# the alias rule, whose old ``\b`` after ``git`` fails before ``=``. The
 # last two are unchanged rules, pinned so a future edit cannot quietly break
 # them.
 #
@@ -326,6 +329,26 @@ BYPASS_MATCH_CASES = [
     (
         "[BYPASS] Deny heredoc containing git write subcommand",
         "cat <<EOF\nhello world\nEOF",
+        False,
+    ),
+    (
+        "[BYPASS] Deny heredoc containing git write subcommand",
+        "bash <<'EOF'\ncd repo\ngit commit -m x\nEOF",
+        True,
+    ),
+    (
+        "[BYPASS] Deny heredoc containing git write subcommand",
+        "cat <<EOF | sh\ngh pr merge 1\nEOF",
+        True,
+    ),
+    (
+        "[BYPASS] Deny heredoc containing git write subcommand",
+        "bash <<EOF git -C " + "/".join(["dir"] * 50) + " commit EOF",
+        True,
+    ),
+    (
+        "[BYPASS] Deny heredoc containing git write subcommand",
+        "git commit -m x; cat <<EOF\nbody\nEOF",
         False,
     ),
     ("[BYPASS] Deny alias/path override before git invocation", "alias git=/tmp/evil", True),
@@ -375,24 +398,32 @@ def test_bypass_rule_matches_its_named_evasion_form():
 
 
 def test_heredoc_rule_timing_on_pathological_input():
-    """The heredoc deny rule must not blow up quadratically on a `<<`/`git`
-    spam input with no subcommand.
+    """The heredoc deny rule must stay linear on `<<`/`git` spam with no subcommand.
 
-    The second segment used to be an unbounded ``[\\s\\S]*?``, so every
-    ``git`` token triggered a scan to EOF; ``"cat <<EOF git x\\n" * 400``
-    (6.4 KB) took ~3 s. Bounding it with ``[^\\n]*?`` brings this under
-    ~20 ms. The budget is generous to stay stable on slow CI.
+    Two shapes were quadratic. An unbounded second ``[\\s\\S]*?`` made every
+    ``git`` token rescan to EOF (``"cat <<EOF git x\\n" * 400`` took ~3 s),
+    and bounding it with ``[^\\n]*?`` still left the single-line form slow:
+    with no newline ``[^\\n]*?`` is just as unbounded, and the leading lazy
+    ``<<`` restarts the second half at every ``<<`` (``"cat <<EOF git x "``
+    ``* 800``, 12.8 KB, measured 90.6 s). Anchoring at ``\\A`` with an
+    atomic first-``<<`` group and bounding the git line to ``{0,256}``
+    brings both under ~30 ms. The budget is generous to stay stable on
+    slow CI.
     """
     by_description = _deny_rules_by_description()
     found = by_description.get("[BYPASS] Deny heredoc containing git write subcommand")
     assert found is not None
     _filename, regex = found
-    pathological = "cat <<EOF git x\n" * 400
-    start = time.perf_counter()
-    matched = regex.search(pathological)
-    elapsed = time.perf_counter() - start
-    assert matched is None
-    assert elapsed < 1.0, f"heredoc rule took {elapsed:.2f}s on pathological input"
+    cases = {
+        "multi-line": "cat <<EOF git x\n" * 400,
+        "single-line": "cat <<EOF git x " * 800,
+    }
+    for shape, pathological in cases.items():
+        start = time.perf_counter()
+        matched = regex.search(pathological)
+        elapsed = time.perf_counter() - start
+        assert matched is None, f"heredoc rule matched the {shape} spam input"
+        assert elapsed < 1.0, f"heredoc rule took {elapsed:.2f}s on {shape} pathological input"
 
 
 def test_bypass_rules_compile_under_dotall():

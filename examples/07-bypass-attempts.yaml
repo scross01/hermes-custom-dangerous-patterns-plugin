@@ -23,18 +23,26 @@ deny_patterns:
   # `[\s\S]` (not `[^\n]*`): a heredoc payload is always on the line
   # AFTER the `<<`, so a same-line-only pattern can never match a real
   # heredoc. That gap was ungated by any Hermes built-in for non-shell
-  # readers such as cat/tee. The segments are lazy (`*?`) so a command
-  # containing a bare `<<` and no git write cannot match. The second
-  # segment is bounded with `[^\n]*?`: an unbounded second `[\s\S]*?`
-  # scans the rest of the input for every `git` token, which is
-  # quadratic on pathological input like `"cat <<EOF git x\n" * 400`
-  # (measured ~3 s; bounded form is ~20 ms). The trailing
-  # `git\n<subcommand>` shape is vanishingly rare and no longer gated
-  # here.
+  # readers such as cat/tee.
+  #
+  # The match is anchored at `\A` and the first `<<` is taken in an
+  # ATOMIC group: unanchored, every `<<` restarts the second half, and
+  # on a one-line command the bounded `[^\n]*?` is as unbounded as
+  # `[\s\S]*?` (there is no newline to stop it). That is quadratic on
+  # single-line spam like `"cat <<EOF git x " * 800` (12.8 KB measured
+  # 90.6 s; the anchored atomic form takes 0.014 s). After the atomic
+  # commitment the second `[\s\S]*?` runs once and still crosses
+  # newlines to reach the heredoc body. The git line is bounded to
+  # `[^\n]{0,256}?` so each `git` token probes at most 256 characters
+  # instead of the rest of the line; both bounds are load-bearing
+  # (atomic-only 0.34 s, bounded-only 5.5 s at 12.8 KB). Atomic groups
+  # need Python 3.11, which is Hermes' floor. Gated: only git-write
+  # lines that FOLLOW some `<<`. A command with no `<<`, or `git
+  # commit` before the heredoc, is left to 05-git-write.yaml.
   - description: '[BYPASS] Deny heredoc containing git write subcommand'
     enabled: true
     group: BYPASS
-    pattern: '<<[\s\S]*?\b(?:git|gh)\b[^\n]*?\b(?:commit|push|merge|rebase|reset|clean|restore|checkout|switch|update-index|update-ref|filter-branch|filter-repo|cherry-pick|revert|stash|add|rm|mv|am|apply|fast-import|symbolic-ref|receive-pack)\b'
+    pattern: '\A(?>[\s\S]*?<<)[\s\S]*?\b(?:git|gh)\b[^\n]{0,256}?\b(?:commit|push|merge|rebase|reset|clean|restore|checkout|switch|update-index|update-ref|filter-branch|filter-repo|cherry-pick|revert|stash|add|rm|mv|am|apply|fast-import|symbolic-ref|receive-pack)\b'
   
   # NOTE: when 05-git-write.yaml is also loaded, its generic
   # `git <subcommand>` rules match this first (deny rules are
